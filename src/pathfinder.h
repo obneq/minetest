@@ -26,6 +26,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include <vector>
 
 #include "irr_v3d.h"
+#include "gamedef.h"
+#include "nodedef.h"
 
 
 /******************************************************************************/
@@ -33,6 +35,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 /******************************************************************************/
 
 class ServerEnvironment;
+class IGameDef;
+class INodeDefManager;
 
 /******************************************************************************/
 /* Typedefs and macros                                                        */

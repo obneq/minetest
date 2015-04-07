@@ -318,12 +318,13 @@ std::vector<v3s16> pathfinder::get_Path(ServerEnvironment* env,
 
 		for (std::vector<v3s16>::iterator i = path.begin();
 					i != path.end(); i++) {
-			if (!m_env->line_of_sight(
-				tov3f(getIndexElement(*startpos).pos),
-				tov3f(getIndexElement(*i).pos))) {
-				optimized_path.push_back(getIndexElement(*(i-1)).pos);
-				startpos = (i-1);
-			}
+//			if (!m_env->line_of_sight(
+//				tov3f(getIndexElement(*startpos).pos),
+//				tov3f(getIndexElement(*i).pos))) {
+//				optimized_path.push_back(getIndexElement(*(i-1)).pos);
+//				startpos = (i-1);
+				optimized_path.push_back(getIndexElement(*i).pos);
+//			}
 		}
 
 		optimized_path.push_back(destination);
@@ -477,9 +478,10 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 	path_cost retval;
 
 	retval.updated = true;
+	INodeDefManager *ndef = m_env->getGameDef()->getNodeDefManager();
+	u16 id = ndef->getId("default:water_source");
 
 	v3s16 pos2 = pos + dir;
-
 	//check limits
 	if (    (pos2.X < m_limits.X.min) ||
 			(pos2.X >= m_limits.X.max) ||
@@ -501,7 +503,7 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 
 	if (node_at_pos2.param0 == CONTENT_AIR) {
 		MapNode node_below_pos2 =
-							m_env->getMap().getNodeNoEx(pos2 + v3s16(0,-1,0));
+				m_env->getMap().getNodeNoEx(pos2 + v3s16(0,-1,0));
 
 		//did we get information about node?
 		if (node_below_pos2.param0 == CONTENT_IGNORE ) {
@@ -510,7 +512,9 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 				return retval;
 		}
 
-		if (node_below_pos2.param0 != CONTENT_AIR) {
+		if ((node_below_pos2.param0 != CONTENT_AIR)
+		    && (node_below_pos2.param0 != id)
+		    ) {
 			retval.valid = true;
 			retval.value = 1;
 			retval.direction = 0;
@@ -523,7 +527,9 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 
 			while ((node_at_pos.param0 != CONTENT_IGNORE) &&
 					(node_at_pos.param0 == CONTENT_AIR) &&
-					(testpos.Y > m_limits.Y.min)) {
+					(testpos.Y > m_limits.Y.min)
+					&& (node_at_pos.param0 != id) //neu
+			       ) {
 				testpos += v3s16(0,-1,0);
 				node_at_pos = m_env->getMap().getNodeNoEx(testpos);
 			}
@@ -531,7 +537,9 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 			//did we find surface?
 			if ((testpos.Y >= m_limits.Y.min) &&
 					(node_at_pos.param0 != CONTENT_IGNORE) &&
-					(node_at_pos.param0 != CONTENT_AIR)) {
+					(node_at_pos.param0 != CONTENT_AIR)
+//					&& (node_at_pos.param0 != id)
+			    ) {
 				if (((pos2.Y - testpos.Y)*-1) <= m_maxdrop) {
 					retval.valid = true;
 					retval.value = 2;
@@ -557,14 +565,18 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 
 		while ((node_at_pos.param0 != CONTENT_IGNORE) &&
 				(node_at_pos.param0 != CONTENT_AIR) &&
-				(testpos.Y < m_limits.Y.max)) {
+				(testpos.Y < m_limits.Y.max)
+				&& (node_at_pos.param0 != id)
+		       ) {
 			testpos += v3s16(0,1,0);
 			node_at_pos = m_env->getMap().getNodeNoEx(testpos);
 		}
 
 		//did we find surface?
 		if ((testpos.Y <= m_limits.Y.max) &&
-				(node_at_pos.param0 == CONTENT_AIR)) {
+				(node_at_pos.param0 == CONTENT_AIR)
+//				&& (node_at_pos.param0 != id)
+		    ) {
 
 			if (testpos.Y - pos2.Y <= m_maxjump) {
 				retval.valid = true;
