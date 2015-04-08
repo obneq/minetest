@@ -482,6 +482,7 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 	u16 id = ndef->getId("default:water_source");
 
 	v3s16 pos2 = pos + dir;
+
 	//check limits
 	if (    (pos2.X < m_limits.X.min) ||
 			(pos2.X >= m_limits.X.max) ||
@@ -503,7 +504,7 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 
 	if (node_at_pos2.param0 == CONTENT_AIR) {
 		MapNode node_below_pos2 =
-				m_env->getMap().getNodeNoEx(pos2 + v3s16(0,-1,0));
+							m_env->getMap().getNodeNoEx(pos2 + v3s16(0,-1,0));
 
 		//did we get information about node?
 		if (node_below_pos2.param0 == CONTENT_IGNORE ) {
@@ -513,7 +514,7 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 		}
 
 		if ((node_below_pos2.param0 != CONTENT_AIR)
-		    && (node_below_pos2.param0 != id)
+		    && (node_below_pos2.param0 != id) // avoid node type
 		    ) {
 			retval.valid = true;
 			retval.value = 1;
@@ -527,9 +528,7 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 
 			while ((node_at_pos.param0 != CONTENT_IGNORE) &&
 					(node_at_pos.param0 == CONTENT_AIR) &&
-					(testpos.Y > m_limits.Y.min)
-					&& (node_at_pos.param0 != id) //neu
-			       ) {
+					(testpos.Y > m_limits.Y.min)) {
 				testpos += v3s16(0,-1,0);
 				node_at_pos = m_env->getMap().getNodeNoEx(testpos);
 			}
@@ -538,7 +537,7 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 			if ((testpos.Y >= m_limits.Y.min) &&
 					(node_at_pos.param0 != CONTENT_IGNORE) &&
 					(node_at_pos.param0 != CONTENT_AIR)
-//					&& (node_at_pos.param0 != id)
+					&& (node_at_pos.param0 != id) // avoid node type
 			    ) {
 				if (((pos2.Y - testpos.Y)*-1) <= m_maxdrop) {
 					retval.valid = true;
@@ -565,9 +564,7 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 
 		while ((node_at_pos.param0 != CONTENT_IGNORE) &&
 				(node_at_pos.param0 != CONTENT_AIR) &&
-				(testpos.Y < m_limits.Y.max)
-				&& (node_at_pos.param0 != id)
-		       ) {
+				(testpos.Y < m_limits.Y.max)) {
 			testpos += v3s16(0,1,0);
 			node_at_pos = m_env->getMap().getNodeNoEx(testpos);
 		}
@@ -575,7 +572,7 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 		//did we find surface?
 		if ((testpos.Y <= m_limits.Y.max) &&
 				(node_at_pos.param0 == CONTENT_AIR)
-//				&& (node_at_pos.param0 != id)
+				&& (node_at_pos.param0 != id) // avoid node type
 		    ) {
 
 			if (testpos.Y - pos2.Y <= m_maxjump) {
