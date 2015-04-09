@@ -35,8 +35,6 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 /******************************************************************************/
 
 class ServerEnvironment;
-class IGameDef;
-class INodeDefManager;
 
 /******************************************************************************/
 /* Typedefs and macros                                                        */

@@ -523,13 +523,13 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 					<< " cost same height found" << std::endl);
 		}
 		else {
-			v3s16 testpos = pos2 - v3s16(0,-1,0);
+			v3s16 testpos = pos2 - v3s16(0,-1,0); // -1 here
 			MapNode node_at_pos = m_env->getMap().getNodeNoEx(testpos);
 
 			while ((node_at_pos.param0 != CONTENT_IGNORE) &&
 					(node_at_pos.param0 == CONTENT_AIR) &&
 					(testpos.Y > m_limits.Y.min)) {
-				testpos += v3s16(0,-1,0);
+				testpos += v3s16(0,-1,0); // -1 here...
 				node_at_pos = m_env->getMap().getNodeNoEx(testpos);
 			}
 
@@ -539,7 +539,10 @@ path_cost pathfinder::calc_cost(v3s16 pos,v3s16 dir) {
 					(node_at_pos.param0 != CONTENT_AIR)
 					&& (node_at_pos.param0 != id) // avoid node type
 			    ) {
-				if (((pos2.Y - testpos.Y)*-1) <= m_maxdrop) {
+				//if (((pos2.Y - testpos.Y)*-1) <= m_maxdrop) { //hmmm is this right?
+				//std::cout << pos2.Y - testpos.Y << std::endl;
+
+				if ((pos2.Y - testpos.Y - 1) <= 1) { //so...
 					retval.valid = true;
 					retval.value = 2;
 					//difference of y-pos +1 (target node is ABOVE solid node)
