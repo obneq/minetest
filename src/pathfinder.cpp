@@ -665,6 +665,11 @@ bool pathfinder::update_all_costs(	v3s16 ipos,
 	directions.push_back(v3s16( 0,0, 1));
 	directions.push_back(v3s16( 0,0,-1));
 
+	directions.push_back(v3s16( 1,0, 1));
+	directions.push_back(v3s16(-1,0, 1));
+	directions.push_back(v3s16(-1,0,-1));
+	directions.push_back(v3s16( 1,0,-1));
+
 	for (unsigned int i=0; i < directions.size(); i++) {
 		if (directions[i] != srcdir) {
 			path_cost cost = g_pos.get_cost(directions[i]);
