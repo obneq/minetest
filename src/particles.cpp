@@ -242,7 +242,7 @@ public:
                         //to ensure particles collide with correct position
                         v3f off = intToFloat(m_env->getCameraOffset(), BS);
 
-                        particlearray[i].pos += off;
+                       particlearray[i].pos += off;
 
                         collisionMoveSimple(m_env, m_gamedef,
                                             BS * 0.5, box,
@@ -251,7 +251,7 @@ public:
                                             particlearray[i].vector,
                                             acc);
 
-                        particlearray[i].pos -= off;
+                       particlearray[i].pos -= off;
 
                         // TODO: create light affector?
 //                        try{
@@ -385,7 +385,7 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 		ps->setAutomaticCulling(scene::EAC_OFF);
 		ps->setDebugDataVisible(irr::scene::EDS_BBOX);
 
-		ps->setPosition(pos * BS);
+		ps->setPosition(pos * BS/*  - intToFloat(m_env->getCameraOffset(), BS)*/);
 
 		ps->setMaterialFlag(video::EMF_LIGHTING, false);
 		ps->setMaterialFlag(video::EMF_BACK_FACE_CULLING, false);
@@ -410,7 +410,14 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 			ps->addAnimator(pan);
 			pan->drop();
 		}
+
+//		scene::ISceneNodeAnimator* wub = m_smgr->createFlyCircleAnimator(pos*BS, 101);
+//		ps->addAnimator(wub);
+//		wub->drop();
+
 		return;
+
+
 	}
 
 	if (event->type == CE_SPAWN_PARTICLE) {
@@ -455,19 +462,21 @@ void ParticleManager::addNodeParticle(IGameDef* gamedef, LocalPlayer *player,
 	u8 texid = myrand_range(0, 5);
 	video::ITexture *texture = tiles[texid].texture;
 
-	v3f particlepos = intToFloat(pos, BS);
+	v3f particlepos = intToFloat(pos, BS)/* - intToFloat(m_env->getCameraOffset(), BS)*/;
 
 	scene::CParticleSystemSceneNode2 *ps = new scene::CParticleSystemSceneNode2(
 				m_smgr->getRootSceneNode(), m_smgr, -1,
 				m_env, particlepos);
+
 	scene::IParticleEmitter* em;
 	ps->setDebugDataVisible(irr::scene::EDS_BBOX);
 
-	ps->setPosition(particlepos);
 
 	em = new FixNumEmitter(number);
 	ps->setEmitter(em);
 	em->drop();
+
+	ps->setPosition(particlepos);
 
 	scene::IParticleAffector* paf1 = new MTGravityAffector(v3f(0.0, -0.1, 0.0), 2000);
 	ps->addAffector(paf1);
@@ -490,25 +499,6 @@ void ParticleManager::addNodeParticle(IGameDef* gamedef, LocalPlayer *player,
 	ps->setMaterialType(video::EMT_TRANSPARENT_ALPHA_CHANNEL);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Copyright (C) 2002-2012 Nikolaus Gebhardt
-// This file is part of the "Irrlicht Engine".
-// For conditions of distribution and use, see copyright notice in irrlicht.h
-//#include "os.h"
 #include "ISceneManager.h"
 #include "ICameraSceneNode.h"
 #include "IVideoDriver.h"
@@ -518,38 +508,18 @@ namespace irr
 {
 namespace scene
 {
-
-//! Bitflags to control particle behavior
-enum EParticleBehavior
-{
-	//! Continue emitting new particles even when the node is invisible
-	EPB_INVISIBLE_EMITTING = 1,
-
-	//! Continue affecting particles even when the node is invisible
-	EPB_INVISIBLE_AFFECTING = 2,
-
-	//! Continue updating particle positions or deleting them even when the node is invisible
-	EPB_INVISIBLE_ANIMATING = 4,
-
-	//! Clear all particles when node gets invisible
-	EPB_CLEAR_ON_INVISIBLE = 8,
-
-	//! Particle movement direction on emitting ignores the node rotation
-	//! This is mainly to allow backward compatible behavior to Irrlicht 1.8
-	EPB_EMITTER_VECTOR_IGNORE_ROTATION = 16,
-
-	//! On emitting global particles interpolate the positions randomly between the last and current node transformations.
-	//! This can be set to avoid gaps caused by fast node movement or low framerates, but will be somewhat
-	//! slower to calculate.
-	EPB_EMITTER_FRAME_INTERPOLATION = 32
-};
 //! constructor
-CParticleSystemSceneNode2::CParticleSystemSceneNode2(ISceneNode* parent, ISceneManager* mgr, s32 id, ClientEnvironment *env
-						   /*const core::vector3df& position, const core::vector3df& rotation,
-						   const core::vector3df& scale*/, v3f rpos)
-	: ISceneNode(parent, mgr, id/*, position, rotation, scale*/),
-	  Emitter(0), ParticleSize(core::dimension2d<f32>(5.0f, 5.0f)), LastEmitTime(0),
-	  Buffer(0), ParticlesAreGlobal(true), m_env(env), rpos(rpos), m_camera_offset(m_env->getCameraOffset()), once(true)
+CParticleSystemSceneNode2::CParticleSystemSceneNode2(ISceneNode* parent, ISceneManager* mgr, s32 id, ClientEnvironment *env, v3f rpos)
+	: ISceneNode(parent, mgr, id),
+	  Emitter(0),
+	  ParticleSize(core::dimension2d<f32>(5.0f, 5.0f)),
+	  LastEmitTime(0),
+	  Buffer(0),
+	  ParticlesAreGlobal(true),
+	  m_env(env),
+	  rpos(rpos),
+	  old_camera_offset(v3s16(0,0,0)/*m_env->getCameraOffset()*/),
+	  first_run(true)
 {
 #ifdef _DEBUG
 	setDebugName("CParticleSystemSceneNode2");
@@ -571,7 +541,7 @@ IParticleEmitter* CParticleSystemSceneNode2::getEmitter()
 	return Emitter;
 }
 //! Sets the particle emitter, which creates the particles.
-void CParticleSystemSceneNode2::setEmitter(IParticleEmitter *emitter)
+void CParticleSystemSceneNode2::setEmitter(IParticleEmitter* emitter)
 {
 	if (emitter == Emitter)
 		return;
@@ -615,7 +585,7 @@ u32 CParticleSystemSceneNode2::getMaterialCount() const
 //! pre render event
 void CParticleSystemSceneNode2::OnRegisterSceneNode()
 {
-	doParticleSystem(getTimeMs());//os::Timer::getTime());
+	doParticleSystem(getTimeMs());
 	if (IsVisible && (Particles.size() != 0))
 	{
 		SceneManager->registerNodeForRendering(this);
@@ -641,37 +611,15 @@ void CParticleSystemSceneNode2::render()
 	// reallocate arrays, if they are too small
 	reallocateBuffers();
 
-	bool update = false;
-	v3s16 camera_offset = m_env->getCameraOffset();
-	if (camera_offset != m_camera_offset) {
-		update = true;
-	}
-
-	v3f offset = intToFloat(camera_offset, BS);
-
-	if (once) {
-		once = false;
-		RelativeTranslation = rpos - intToFloat(m_camera_offset, BS);
-		for (u32 i=0; i<Particles.size(); ++i)
-		{
-			//Particles[i].pos += intToFloat(m_camera_offset, BS);
-			Particles[i].pos -= intToFloat(m_camera_offset, BS);
-		}
-	}
+	// adjust for mt/irrlicht camera offset
+	// its horribly slow for some reason
 
 
-	if (update) {
-		once = false;
-		std::cout << "offset : " << PP(offset) << std::endl;
-		RelativeTranslation = rpos - offset;
 
-		for (u32 i=0; i<Particles.size(); ++i)
-		{
-			Particles[i].pos += intToFloat(m_camera_offset, BS);
-			Particles[i].pos -= intToFloat(camera_offset, BS);
-		}
-		m_camera_offset = camera_offset;
-	}
+
+
+
+
 
 	// create particle vertex data
 	s32 idx = 0;
@@ -705,10 +653,8 @@ void CParticleSystemSceneNode2::render()
 		Buffer->Vertices[3+idx].Color = particle.color;
 		Buffer->Vertices[3+idx].Normal = view;
 
-//			Buffer->Vertices[0+idx].Pos -= offset;
-//			Buffer->Vertices[1+idx].Pos -= offset;
-//			Buffer->Vertices[2+idx].Pos -= offset;
-//			Buffer->Vertices[3+idx].Pos -= offset;
+//		for (int j=0; j<4; j++)
+//			Buffer->Vertices[j+idx].Pos -= now;
 
 		idx +=4;
 	}
@@ -720,7 +666,6 @@ void CParticleSystemSceneNode2::render()
 	driver->setMaterial(Buffer->Material);
 	driver->drawVertexPrimitiveList(Buffer->getVertices(), Particles.size()*4,
 					Buffer->getIndices(), Particles.size()*2, video::EVT_STANDARD, EPT_TRIANGLES,Buffer->getIndexType());
-
 	// for debug purposes only:
 	if ( DebugDataVisible & scene::EDS_BBOX )
 	{
@@ -738,104 +683,83 @@ const core::aabbox3d<f32>& CParticleSystemSceneNode2::getBoundingBox() const
 }
 void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 {
+
+	const v3f old = intToFloat(old_camera_offset, BS);
+	v3s16 camera_offset = m_env->getCameraOffset();
+	const v3f onow = intToFloat(camera_offset, BS);
+
+	bool update = camera_offset != old_camera_offset;
+	if (update) {
+		//std::cout << "update! old offset: " << PP(old_camera_offset) << "new offset: " << PP(camera_offset) << std::endl;
+		old_camera_offset = camera_offset;
+		RelativeTranslation += old;
+		RelativeTranslation -= onow;
+	}
+
 	if (LastEmitTime==0)
 	{
 		LastEmitTime = time;
-		LastAbsoluteTransformation = AbsoluteTransformation;
 		return;
 	}
-
 	u32 now = time;
 	u32 timediff = time - LastEmitTime;
 	LastEmitTime = time;
-	bool visible = isVisible();
-	int behavior = 1;//getParticleBehavior();
 	// run emitter
-	if (Emitter && (visible || behavior & EPB_INVISIBLE_EMITTING) )
+	if (Emitter && IsVisible && !update)
 	{
 		SParticle* array = 0;
 		s32 newParticles = Emitter->emitt(now, timediff, array);
+		if (update) { std::cout << "new particles: " << newParticles << std::endl;}
 		if (newParticles && array)
 		{
 			s32 j=Particles.size();
-			if (newParticles > 16250-j)	// avoid having more than 64k vertices in the scenenode
+			if (newParticles > 16250-j)
 				newParticles=16250-j;
 			Particles.set_used(j+newParticles);
 			for (s32 i=j; i<j+newParticles; ++i)
 			{
 				Particles[i]=array[i-j];
-				if ( ParticlesAreGlobal && behavior & EPB_EMITTER_FRAME_INTERPOLATION )
-				{
-					// Interpolate between current node transformations and last ones.
-					// (Lazy solution - calculating twice and interpolating results)
-					f32 randInterpolate = (f32)(rand() % 101) / 100.f;	// 0 to 1
-					core::vector3df posNow(Particles[i].pos);
-					core::vector3df posLast(Particles[i].pos);
-					AbsoluteTransformation.transformVect(posNow);
-					LastAbsoluteTransformation.transformVect(posLast);
-					Particles[i].pos = posNow.getInterpolated(posLast, randInterpolate);
-					if ( !(behavior & EPB_EMITTER_VECTOR_IGNORE_ROTATION) )
-					{
-						core::vector3df vecNow(Particles[i].startVector);
-						core::vector3df vecOld(Particles[i].startVector);
-						AbsoluteTransformation.rotateVect(vecNow);
-						LastAbsoluteTransformation.rotateVect(vecOld);
-						Particles[i].startVector = vecNow.getInterpolated(vecOld, randInterpolate);
-						vecNow = Particles[i].vector;
-						vecOld = Particles[i].vector;
-						AbsoluteTransformation.rotateVect(vecNow);
-						LastAbsoluteTransformation.rotateVect(vecOld);
-						Particles[i].vector = vecNow.getInterpolated(vecOld, randInterpolate);
-					}
-				}
-				else
-				{
-					if (ParticlesAreGlobal)
-						AbsoluteTransformation.transformVect(Particles[i].pos);
-					if ( !(behavior & EPB_EMITTER_VECTOR_IGNORE_ROTATION) )
-					{
-						if (!ParticlesAreGlobal)
-							AbsoluteTransformation.rotateVect(Particles[i].pos);
-						AbsoluteTransformation.rotateVect(Particles[i].startVector);
-						AbsoluteTransformation.rotateVect(Particles[i].vector);
-					}
-				}
+
+				AbsoluteTransformation.rotateVect(Particles[i].startVector);
+				if (ParticlesAreGlobal)
+					AbsoluteTransformation.transformVect(Particles[i].pos);
 			}
 		}
 	}
+
 	// run affectors
-	if ( visible || behavior & EPB_INVISIBLE_AFFECTING )
-	{
-		core::list<IParticleAffector*>::Iterator ait = AffectorList.begin();
-		for (; ait != AffectorList.end(); ++ait)
-			(*ait)->affect(now, Particles.pointer(), Particles.size());
-	}
+	core::list<IParticleAffector*>::Iterator ait = AffectorList.begin();
+	for (; ait != AffectorList.end(); ++ait)
+		(*ait)->affect(now, Particles.pointer(), Particles.size());
 	if (ParticlesAreGlobal)
 		Buffer->BoundingBox.reset(AbsoluteTransformation.getTranslation());
 	else
 		Buffer->BoundingBox.reset(core::vector3df(0,0,0));
 	// animate all particles
-	if ( visible || behavior & EPB_INVISIBLE_ANIMATING )
+	f32 scale = (f32)timediff;
+	for (u32 i=0; i<Particles.size();)
 	{
-		f32 scale = (f32)timediff;
-		for (u32 i=0; i<Particles.size();)
+		// erase is pretty expensive!
+		if (now > Particles[i].endTime)
 		{
-			// erase is pretty expensive!
-			if (now > Particles[i].endTime)
-			{
-				// Particle order does not seem to matter.
-				// So we can delete by switching with last particle and deleting that one.
-				// This is a lot faster and speed is very important here as the erase otherwise
-				// can cause noticable freezes.
-				Particles[i] = Particles[Particles.size()-1];
-				Particles.erase( Particles.size()-1 );
+			// Particle order does not seem to matter.
+			// So we can delete by switching with last particle and deleting that one.
+			// This is a lot faster and speed is very important here as the erase otherwise
+			// can cause noticable freezes.
+			Particles[i] = Particles[Particles.size()-1];
+			Particles.erase( Particles.size()-1 );
+		}
+		else
+		{
+
+			if(update) {
+				Particles[i].pos += old;
+				Particles[i].pos -= onow;
 			}
-			else
-			{
-				Particles[i].pos += (Particles[i].vector * scale);
-				Buffer->BoundingBox.addInternalPoint(Particles[i].pos);
-				++i;
-			}
+
+			Particles[i].pos += (Particles[i].vector * scale);
+			Buffer->BoundingBox.addInternalPoint(Particles[i].pos);
+			++i;
 		}
 	}
 	const f32 m = (ParticleSize.Width > ParticleSize.Height ? ParticleSize.Width : ParticleSize.Height) * 0.5f;
@@ -850,7 +774,6 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 		core::matrix4 absinv( AbsoluteTransformation, core::matrix4::EM4CONST_INVERSE );
 		absinv.transformBoxEx(Buffer->BoundingBox);
 	}
-	LastAbsoluteTransformation = AbsoluteTransformation;
 }
 //! Sets if the particles should be global. If it is, the particles are affected by
 //! the movement of the particle system scene node too, otherwise they completely
@@ -863,16 +786,6 @@ void CParticleSystemSceneNode2::setParticlesAreGlobal(bool global)
 void CParticleSystemSceneNode2::clearParticles()
 {
 	Particles.set_used(0);
-}
-//! Sets if the node should be visible or not.
-void CParticleSystemSceneNode2::setVisible(bool isVisible)
-{
-	ISceneNode::setVisible(isVisible);
-	if ( !isVisible /*&& getParticleBehavior()*/ & EPB_CLEAR_ON_INVISIBLE )
-	{
-		clearParticles();
-		LastEmitTime = 0;
-	}
 }
 //! Sets the size of all particles.
 void CParticleSystemSceneNode2::setParticleSize(const core::dimension2d<f32> &size)
@@ -920,4 +833,3 @@ void CParticleSystemSceneNode2::reallocateBuffers()
 }
 } // end namespace scene
 } // end namespace irr
-
