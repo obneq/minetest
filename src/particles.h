@@ -315,6 +315,8 @@ public:
 //        virtual IParticleRotationAffector* createRotationAffector(
 //                        const core::vector3df& speed = core::vector3df(5.0f,5.0f,5.0f),
 //                        const core::vector3df& pivotPoint = core::vector3df(0.0f,0.0f,0.0f) ) ;
+        virtual void setPosition(const core::vector3df newpos);
+        virtual void upd(v3s16 camera_offset);
         //! Sets the size of all particles.
         virtual void setParticleSize(
                         const core::dimension2d<f32> &size = core::dimension2d<f32>(5.0f, 5.0f)) ;

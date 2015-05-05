@@ -368,8 +368,8 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 
 		wtfEmitter * em = new PointEmitter(
 					random_v3f(v3f(-0.25,-0.25,-0.25), v3f(0.25, 0.25, 0.25))/10,
-					4, // 5, //minpps
-					12, // 20,//maxpps
+					pps, // 5, //minpps
+					pps*1.01, // 20,//maxpps
 					video::SColor(255.0, 255.0, 255.0, 255.0), //mincol,
 					video::SColor(255.0, 255.0, 255.0, 255.0), //maxcol,
 					event->add_particlespawner.minexptime*1000,
@@ -411,9 +411,9 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 			pan->drop();
 		}
 
-//		scene::ISceneNodeAnimator* wub = m_smgr->createFlyCircleAnimator(pos*BS, 101);
-//		ps->addAnimator(wub);
-//		wub->drop();
+		scene::ISceneNodeAnimator* wub = m_smgr->createFlyCircleAnimator(pos*BS-intToFloat(m_env->getCameraOffset(), BS), 300);
+		ps->addAnimator(wub);
+		wub->drop();
 
 		return;
 
@@ -534,6 +534,10 @@ CParticleSystemSceneNode2::~CParticleSystemSceneNode2()
 	if (Buffer)
 		Buffer->drop();
 	removeAllAffectors();
+}
+void CParticleSystemSceneNode2::setPosition(const core::vector3df newpos)
+{
+		RelativeTranslation = newpos;
 }
 //! Gets the particle emitter, which creates the particles.
 IParticleEmitter* CParticleSystemSceneNode2::getEmitter()
@@ -681,20 +685,22 @@ const core::aabbox3d<f32>& CParticleSystemSceneNode2::getBoundingBox() const
 {
 	return Buffer->getBoundingBox();
 }
+void CParticleSystemSceneNode2::upd(v3s16 camera_offset) {
+	const v3f ps_offset = intToFloat(old_camera_offset - camera_offset, BS);
+	for (u32 i = 0; i<Particles.size(); ++i) {
+		Particles[i].pos += ps_offset;
+	}
+	RelativeTranslation += ps_offset;
+}
+
 void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 {
-
-	const v3f old = intToFloat(old_camera_offset, BS);
 	v3s16 camera_offset = m_env->getCameraOffset();
-	const v3f onow = intToFloat(camera_offset, BS);
-
-	bool update = camera_offset != old_camera_offset;
-	if (update) {
-		//std::cout << "update! old offset: " << PP(old_camera_offset) << "new offset: " << PP(camera_offset) << std::endl;
+	if (old_camera_offset!=camera_offset){
+		upd(camera_offset);
 		old_camera_offset = camera_offset;
-		RelativeTranslation += old;
-		RelativeTranslation -= onow;
 	}
+
 
 	if (LastEmitTime==0)
 	{
@@ -705,11 +711,11 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 	u32 timediff = time - LastEmitTime;
 	LastEmitTime = time;
 	// run emitter
-	if (Emitter && IsVisible && !update)
+	if (Emitter && IsVisible)
 	{
 		SParticle* array = 0;
 		s32 newParticles = Emitter->emitt(now, timediff, array);
-		if (update) { std::cout << "new particles: " << newParticles << std::endl;}
+		//if (update) { std::cout << "new particles: " << newParticles << std::endl;}
 		if (newParticles && array)
 		{
 			s32 j=Particles.size();
@@ -751,12 +757,6 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 		}
 		else
 		{
-
-			if(update) {
-				Particles[i].pos += old;
-				Particles[i].pos -= onow;
-			}
-
 			Particles[i].pos += (Particles[i].vector * scale);
 			Buffer->BoundingBox.addInternalPoint(Particles[i].pos);
 			++i;
