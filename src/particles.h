@@ -30,7 +30,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 struct ClientEvent;
 class ParticleManager;
-class wtfemitter;
+class MTEmitter;
 
 /**
  * Class doing particle as well as their spawners handling
@@ -189,9 +189,9 @@ public:
         //! destructor
         virtual ~CParticleSystemSceneNode2();
         //! Gets the particle emitter, which creates the particles.
-        virtual wtfemitter* getEmitter() ;
+        virtual MTEmitter* getEmitter() ;
         //! Sets the particle emitter, which creates the particles.
-        virtual void setEmitter(wtfemitter *emitter) ;
+        virtual void setEmitter(MTEmitter *emitter) ;
         //! Adds new particle affector to the particle system.
         virtual void addAffector(IParticleAffector* affector) ;
         //! Get a list of all particle affectors.
@@ -230,7 +230,7 @@ public:
 private:
         void reallocateBuffers();
         core::list<IParticleAffector*> AffectorList;
-        wtfemitter* Emitter;
+        MTEmitter* Emitter;
         core::array<SParticle> Particles;
         core::dimension2d<f32> ParticleSize;
         u32 LastEmitTime;
