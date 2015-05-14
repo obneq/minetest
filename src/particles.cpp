@@ -37,6 +37,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 class Map;
 class IGameDef;
 class Environment;
+
 #define PP(x) "("<<(x).X<<","<<(x).Y<<","<<(x).Z<<")"
 /*
 
@@ -50,35 +51,13 @@ v3f random_v3f(v3f min, v3f max)
 			rand()/(float)RAND_MAX*(max.Z-min.Z)+min.Z);
 }
 
-class wtfEmitter : public irr::scene::IParticleEmitter {
+class wtfemitter : public io::IAttributeExchangingObject {
 public:
-        virtual void setDirection( const core::vector3df& newDirection ) {  }
-        virtual void setMinParticlesPerSecond( u32 minPPS ) {  }
-        virtual void setMaxParticlesPerSecond( u32 maxPPS ) {  }
-        virtual void setMinStartColor( const video::SColor& color ) {  }
-        virtual void setMaxStartColor( const video::SColor& color ) {  }
-        virtual void setMaxLifeTime( const u32 t ) {  }
-        virtual void setMinLifeTime( const u32 t ) { }
-        virtual u32 getMaxLifeTime() const { return 1; }
-        virtual u32 getMinLifeTime() const { return 1; }
-        virtual void setMaxAngleDegrees(const s32 t ) {  }
-        virtual s32 getMaxAngleDegrees() const { return 0; }
-        virtual void setMaxStartSize( const core::dimension2df& size ) { }
-        virtual void setMinStartSize( const core::dimension2df& size ) {  }
-        virtual void setCenter( const core::vector3df& center ) {  }
-        virtual void setRadius( f32 radius ) {  }
-        virtual const core::vector3df& getDirection() const { return v3f(0.0, 0.0, 0.0); }
-        virtual u32 getMinParticlesPerSecond() const { return 1; }
-        virtual u32 getMaxParticlesPerSecond() const { return 1; }
-        virtual const video::SColor& getMinStartColor() const { return video::SColor(1); }
-        virtual const video::SColor& getMaxStartColor() const { return video::SColor(1);; }
-        virtual const core::dimension2df& getMaxStartSize() const { return core::dimension2d<f32>(0.2, 0.2); }
-        virtual const core::dimension2df& getMinStartSize() const { return core::dimension2d<f32>(0.2, 0.2); }
-        virtual const core::vector3df& getCenter() const { return v3f(0.0, 0.0, 0.0); }
-        virtual f32 getRadius() const { return 1.; }
+	virtual s32 emitt(u32 now, u32 timeSinceLastCall, scene::SParticle*& outArray) = 0;
+
 };
 
-class FixNumEmitter :  public wtfEmitter {
+class FixNumEmitter :  public wtfemitter {
 private:
         core::array<irr::scene::SParticle> particles;
 
@@ -87,7 +66,7 @@ private:
         u32 emitted;
 public:
 
-        FixNumEmitter(/*v3f pos,*/ int number) : number(number), pos(pos), emitted(0) {}
+        FixNumEmitter(int number) : number(number), emitted(0) {}
 
         s32 emitt(u32 now, u32 timeSinceLastCall, irr::scene::SParticle*& outArray)
         {
@@ -130,12 +109,9 @@ public:
         virtual irr::scene::E_PARTICLE_EMITTER_TYPE getType() const {
                 return (irr::scene::E_PARTICLE_EMITTER_TYPE) (irr::scene::EPET_COUNT+1);
         }
-
-        void restart() { emitted=0; }
-
 };
 
-class PointEmitter : public wtfEmitter {
+class PointEmitter : public wtfemitter {
 public:
         PointEmitter(const core::vector3df& direction,
                    u32 minParticlesPerSecond, u32 maxParticlesPerSecond,
@@ -206,76 +182,6 @@ private:
         u32 MinLifeTime, MaxLifeTime;
         u32 Time;
         s32 MaxAngleDegrees;
-};
-
-
-
-class CollisionAffector : public irr::scene::IParticleAffector
-{
-public:
-        CollisionAffector(ClientEnvironment &env)
-        {
-                m_env = &env;
-                m_gamedef = m_env->getGameDef();
-        }
-        void affect(u32 now, irr::scene::SParticle* particlearray, u32 count)
-        {
-                if( LastTime == 0 )
-                {
-                        LastTime = now;
-                        return;
-                }
-                f32 timeDelta = ( now - LastTime ) / 1000.0f;
-
-                LastTime = now;
-                if( !Enabled )
-                        return;
-
-                v3f acc = v3f(0.0, 0.0, 0.0);
-                for(u32 i=0; i<count; ++i)
-                {
-                        irr::scene::SParticle p = particlearray[i];
-                        float size = p.size.Width;
-                        core::aabbox3d<f32> box = core::aabbox3d<f32>
-                                        (-size/2,-size/2,-size/2,size/2,size/2,size/2);
-
-                        //to ensure particles collide with correct position
-                        v3f off = intToFloat(m_env->getCameraOffset(), BS);
-
-                       particlearray[i].pos += off;
-
-                        collisionMoveSimple(m_env, m_gamedef,
-                                            BS * 0.5, box,
-                                            0, timeDelta,
-                                            particlearray[i].pos,
-                                            particlearray[i].vector,
-                                            acc);
-
-                       particlearray[i].pos -= off;
-
-                        // TODO: create light affector?
-//                        try{
-//                                v3s16 p = v3s16(
-//                                                        floor(pos.X+0.5),
-//                                                        floor(pos.Y+0.5),
-//                                                        floor(pos.Z+0.5)
-//                                                        );
-//                                MapNode n = m_env->getClientMap().getNode(p);
-//                                light = n.getLightBlend(m_env->getDayNightRatio(), m_gamedef->ndef());
-//                        }
-//                        catch(InvalidPositionException &e){
-//                                light = blend_light(m_env->getDayNightRatio(), LIGHT_SUN, 0);
-//                        }
-//                        u8 plight = decode_light(light);
-//                        particlearray[i].color = video::SColor(255, plight, plight, plight);
-                }
-        }
-        virtual irr::scene::E_PARTICLE_AFFECTOR_TYPE getType() const {
-                return (irr::scene::E_PARTICLE_AFFECTOR_TYPE) (irr::scene::EPAT_COUNT+1);
-        }
-        irr::u32 LastTime;
-        IGameDef *m_gamedef;
-        ClientEnvironment *m_env;
 };
 
 class MTGravityAffector : public irr::scene::IParticleAffector
@@ -353,7 +259,7 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 
 		scene::CParticleSystemSceneNode2 *ps = new scene::CParticleSystemSceneNode2(
 					m_smgr->getRootSceneNode(), m_smgr, -1,
-					m_env, pos*BS);
+					m_env, event->add_particlespawner.collisiondetection);
 
 		ps->setID((s32) event->add_particlespawner.id);
 
@@ -366,10 +272,10 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 		float minsize = 1;//event->add_particlespawner.minsize;
 		float maxsize = 1;//event->add_particlespawner.maxsize;
 
-		wtfEmitter * em = new PointEmitter(
+		wtfemitter * em = new PointEmitter(
 					random_v3f(v3f(-0.25,-0.25,-0.25), v3f(0.25, 0.25, 0.25))/10,
-					pps, // 5, //minpps
-					pps*1.01, // 20,//maxpps
+					3, //pps, // 5, //minpps
+					4, //pps*2, // 20,//maxpps
 					video::SColor(255.0, 255.0, 255.0, 255.0), //mincol,
 					video::SColor(255.0, 255.0, 255.0, 255.0), //maxcol,
 					event->add_particlespawner.minexptime*1000,
@@ -399,19 +305,13 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 		ps->addAffector(paf1);
 		paf1->drop();
 
-		if (event->add_particlespawner.collisiondetection) {
-			scene::IParticleAffector* paf2 = new CollisionAffector(*m_env);
-			ps->addAffector(paf2);
-			paf2->drop();
-		}
-
 		if (time != 0) {
 			scene::ISceneNodeAnimator* pan =  m_smgr->createDeleteAnimator(time * 1000);
 			ps->addAnimator(pan);
 			pan->drop();
 		}
 
-		scene::ISceneNodeAnimator* wub = m_smgr->createFlyCircleAnimator(pos*BS-intToFloat(m_env->getCameraOffset(), BS), 300);
+		scene::ISceneNodeAnimator* wub = m_smgr->createFlyCircleAnimator(pos*BS, 300);
 		ps->addAnimator(wub);
 		wub->drop();
 
@@ -422,23 +322,6 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 
 	if (event->type == CE_SPAWN_PARTICLE) {
 		//TODO: use FixNumEmitter here
-
-		//		video::ITexture *texture =
-		//			gamedef->tsrc()->getTextureForMesh(*(event->spawn_particle.texture));
-
-		//		Particle* toadd = new Particle(gamedef, smgr, player, m_env,
-		//				*event->spawn_particle.pos,
-		//				*event->spawn_particle.vel,
-		//				*event->spawn_particle.acc,
-		//				event->spawn_particle.expirationtime,
-		//				event->spawn_particle.size,
-		//				event->spawn_particle.collisiondetection,
-		//				event->spawn_particle.vertical,
-		//				texture,
-		//				v2f(0.0, 0.0),
-		//				v2f(1.0, 1.0));
-
-		//		addParticle(toadd);
 		return;
 	}
 }
@@ -466,9 +349,9 @@ void ParticleManager::addNodeParticle(IGameDef* gamedef, LocalPlayer *player,
 
 	scene::CParticleSystemSceneNode2 *ps = new scene::CParticleSystemSceneNode2(
 				m_smgr->getRootSceneNode(), m_smgr, -1,
-				m_env, particlepos);
+				m_env, true);
 
-	scene::IParticleEmitter* em;
+	wtfemitter* em;
 	ps->setDebugDataVisible(irr::scene::EDS_BBOX);
 
 
@@ -481,10 +364,6 @@ void ParticleManager::addNodeParticle(IGameDef* gamedef, LocalPlayer *player,
 	scene::IParticleAffector* paf1 = new MTGravityAffector(v3f(0.0, -0.1, 0.0), 2000);
 	ps->addAffector(paf1);
 	paf1->drop();
-
-	scene::IParticleAffector* paf2 = new CollisionAffector(*m_env);
-	ps->addAffector(paf2);
-	paf2->drop();
 
 	scene::ISceneNodeAnimator* pan =  m_smgr->createDeleteAnimator(2000); //delete after max lifetime
 	ps->addAnimator(pan);
@@ -509,7 +388,7 @@ namespace irr
 namespace scene
 {
 //! constructor
-CParticleSystemSceneNode2::CParticleSystemSceneNode2(ISceneNode* parent, ISceneManager* mgr, s32 id, ClientEnvironment *env, v3f rpos)
+CParticleSystemSceneNode2::CParticleSystemSceneNode2(ISceneNode* parent, ISceneManager* mgr, s32 id, ClientEnvironment *env, bool collision_detection)
 	: ISceneNode(parent, mgr, id),
 	  Emitter(0),
 	  ParticleSize(core::dimension2d<f32>(5.0f, 5.0f)),
@@ -517,9 +396,9 @@ CParticleSystemSceneNode2::CParticleSystemSceneNode2(ISceneNode* parent, ISceneM
 	  Buffer(0),
 	  ParticlesAreGlobal(true),
 	  m_env(env),
-	  rpos(rpos),
-	  old_camera_offset(v3s16(0,0,0)/*m_env->getCameraOffset()*/),
-	  first_run(true)
+	  m_gamedef(env->getGameDef()),
+	  m_camera_offset(v3s16(0,0,0)),
+	  collision_detection(collision_detection)
 {
 #ifdef _DEBUG
 	setDebugName("CParticleSystemSceneNode2");
@@ -540,12 +419,12 @@ void CParticleSystemSceneNode2::setPosition(const core::vector3df newpos)
 		RelativeTranslation = newpos;
 }
 //! Gets the particle emitter, which creates the particles.
-IParticleEmitter* CParticleSystemSceneNode2::getEmitter()
+wtfemitter* CParticleSystemSceneNode2::getEmitter()
 {
 	return Emitter;
 }
 //! Sets the particle emitter, which creates the particles.
-void CParticleSystemSceneNode2::setEmitter(IParticleEmitter* emitter)
+void CParticleSystemSceneNode2::setEmitter(wtfemitter *emitter)
 {
 	if (emitter == Emitter)
 		return;
@@ -616,14 +495,8 @@ void CParticleSystemSceneNode2::render()
 	reallocateBuffers();
 
 	// adjust for mt/irrlicht camera offset
-	// its horribly slow for some reason
-
-
-
-
-
-
-
+//	v3s16 camera_offset = m_env->getCameraOffset();
+	v3f offset = intToFloat(m_camera_offset, BS);
 
 	// create particle vertex data
 	s32 idx = 0;
@@ -644,24 +517,25 @@ void CParticleSystemSceneNode2::render()
 		f = -0.5f * particle.size.Height;
 		const core::vector3df vertical ( m[1] * f, m[5] * f, m[9] * f );
 #endif
-		Buffer->Vertices[0+idx].Pos = particle.pos + horizontal + vertical;
+		Buffer->Vertices[0+idx].Pos = particle.pos + horizontal + vertical - offset;
 		Buffer->Vertices[0+idx].Color = particle.color;
 		Buffer->Vertices[0+idx].Normal = view;
-		Buffer->Vertices[1+idx].Pos = particle.pos + horizontal - vertical;
+		Buffer->Vertices[1+idx].Pos = particle.pos + horizontal - vertical - offset;
 		Buffer->Vertices[1+idx].Color = particle.color;
 		Buffer->Vertices[1+idx].Normal = view;
-		Buffer->Vertices[2+idx].Pos = particle.pos - horizontal - vertical;
+		Buffer->Vertices[2+idx].Pos = particle.pos - horizontal - vertical - offset;
 		Buffer->Vertices[2+idx].Color = particle.color;
 		Buffer->Vertices[2+idx].Normal = view;
-		Buffer->Vertices[3+idx].Pos = particle.pos - horizontal + vertical;
+		Buffer->Vertices[3+idx].Pos = particle.pos - horizontal + vertical - offset;
 		Buffer->Vertices[3+idx].Color = particle.color;
 		Buffer->Vertices[3+idx].Normal = view;
 
 //		for (int j=0; j<4; j++)
-//			Buffer->Vertices[j+idx].Pos -= now;
+//			Buffer->Vertices[j+idx].Pos -= offset;
 
 		idx +=4;
 	}
+
 	// render all
 	core::matrix4 mat;
 	if (!ParticlesAreGlobal)
@@ -685,23 +559,9 @@ const core::aabbox3d<f32>& CParticleSystemSceneNode2::getBoundingBox() const
 {
 	return Buffer->getBoundingBox();
 }
-void CParticleSystemSceneNode2::upd(v3s16 camera_offset) {
-	const v3f ps_offset = intToFloat(old_camera_offset - camera_offset, BS);
-	for (u32 i = 0; i<Particles.size(); ++i) {
-		Particles[i].pos += ps_offset;
-	}
-	RelativeTranslation += ps_offset;
-}
 
 void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 {
-	v3s16 camera_offset = m_env->getCameraOffset();
-	if (old_camera_offset!=camera_offset){
-		upd(camera_offset);
-		old_camera_offset = camera_offset;
-	}
-
-
 	if (LastEmitTime==0)
 	{
 		LastEmitTime = time;
@@ -710,12 +570,16 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 	u32 now = time;
 	u32 timediff = time - LastEmitTime;
 	LastEmitTime = time;
+
+	v3s16 offset = m_env->getCameraOffset();
+	if (offset != m_camera_offset)
+		m_camera_offset = offset;
+
 	// run emitter
 	if (Emitter && IsVisible)
 	{
 		SParticle* array = 0;
 		s32 newParticles = Emitter->emitt(now, timediff, array);
-		//if (update) { std::cout << "new particles: " << newParticles << std::endl;}
 		if (newParticles && array)
 		{
 			s32 j=Particles.size();
@@ -743,6 +607,7 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 		Buffer->BoundingBox.reset(core::vector3df(0,0,0));
 	// animate all particles
 	f32 scale = (f32)timediff;
+
 	for (u32 i=0; i<Particles.size();)
 	{
 		// erase is pretty expensive!
@@ -757,7 +622,30 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 		}
 		else
 		{
-			Particles[i].pos += (Particles[i].vector * scale);
+			if (collision_detection) {
+				v3f acc = v3f(0,0,0);
+				irr::scene::SParticle p = Particles[i];
+				float size = p.size.Width;
+				core::aabbox3d<f32> box = core::aabbox3d<f32>
+						(-size/2,-size/2,-size/2,size/2,size/2,size/2);
+
+				// wut
+				v3f pdir = Particles[i].vector*100;
+				v3f ppos = Particles[i].pos;
+				collisionMoveSimple(m_env, m_gamedef,
+						    BS * 0.5, box,
+						    0, timediff,
+						    //ppos,
+						    Particles[i].pos,
+						    pdir,
+//						    Particles[i].vector,
+						    acc);
+				//Particles[i].vector = pdir;
+				//Particles[i].pos = ppos;
+			} else {
+				Particles[i].pos += (Particles[i].vector * scale);
+			}
+
 			Buffer->BoundingBox.addInternalPoint(Particles[i].pos);
 			++i;
 		}
@@ -769,6 +657,10 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 	Buffer->BoundingBox.MinEdge.X -= m;
 	Buffer->BoundingBox.MinEdge.Y -= m;
 	Buffer->BoundingBox.MinEdge.Z -= m;
+
+	v3f camera_offset = intToFloat(m_camera_offset, BS);
+	Buffer->BoundingBox.MaxEdge -= camera_offset;
+	Buffer->BoundingBox.MinEdge -= camera_offset;
 	if (ParticlesAreGlobal)
 	{
 		core::matrix4 absinv( AbsoluteTransformation, core::matrix4::EM4CONST_INVERSE );
@@ -786,18 +678,6 @@ void CParticleSystemSceneNode2::setParticlesAreGlobal(bool global)
 void CParticleSystemSceneNode2::clearParticles()
 {
 	Particles.set_used(0);
-}
-//! Sets the size of all particles.
-void CParticleSystemSceneNode2::setParticleSize(const core::dimension2d<f32> &size)
-{
-	//os::Printer::log("setParticleSize is deprecated, use setMinStartSize/setMaxStartSize in emitter.", irr::ELL_WARNING);
-	//A bit of a hack, but better here than in the particle code
-	if (Emitter)
-	{
-		Emitter->setMinStartSize(size);
-		Emitter->setMaxStartSize(size);
-	}
-	ParticleSize = size;
 }
 void CParticleSystemSceneNode2::reallocateBuffers()
 {
