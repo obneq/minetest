@@ -39,7 +39,7 @@ class ParticleManager
 {
 public:
 	ParticleManager(ClientEnvironment* env, irr::scene::ISceneManager* smgr);
-	~ParticleManager();
+//	~ParticleManager();
 
 	void handleParticleEvent(ClientEvent *event, IGameDef *gamedef, LocalPlayer *player);
 
@@ -55,114 +55,11 @@ public:
 protected:
 
 private:
-//	void stepSpawners (float dtime);
-
-	void clearAll ();
-
-	//std::map<u32, s32> irrlicht_spawners; //mt id/irrlicht node id
-	//v3s16 m_camera_offset;
-
-
 	ClientEnvironment* m_env;
 	irr::scene::ISceneManager* m_smgr;
-	//JMutex m_spawner_list_lock;
 };
 
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // Copyright (C) 2002-2012 Nikolaus Gebhardt
 // This file is part of the "Irrlicht Engine".
@@ -173,10 +70,21 @@ private:
 #include "irrArray.h"
 #include "irrList.h"
 #include "SMeshBuffer.h"
+
+class MTEmitter;
+class MTAffector;
+
 namespace irr
 {
 namespace scene
 {
+
+struct MTParticle : SParticle
+{
+	// acceleration
+	core::vector3df acc;
+};
+
 //! A particle system scene node.
 /** A scene node controlling a particle system. The behavior of the particles
 can be controlled by setting the right particle emitters and affectors.
@@ -193,9 +101,9 @@ public:
         //! Sets the particle emitter, which creates the particles.
         virtual void setEmitter(MTEmitter *emitter) ;
         //! Adds new particle affector to the particle system.
-        virtual void addAffector(IParticleAffector* affector) ;
+        virtual void addAffector(MTAffector *affector) ;
         //! Get a list of all particle affectors.
-        virtual const core::list<IParticleAffector*>& getAffectors() const ;
+        virtual const core::list<MTAffector *> &getAffectors() const ;
         //! Removes all particle affectors in the particle system.
         virtual void removeAllAffectors() ;
         //! Returns the material based on the zero based index i.
@@ -225,13 +133,13 @@ public:
 //        virtual void serializeAttributes(io::IAttributes* out, io::SAttributeReadWriteOptions* options=0) const ;
 //        //! Reads attributes of the scene node.
 //        virtual void deserializeAttributes(io::IAttributes* in, io::SAttributeReadWriteOptions* options=0) ;
-        //! Returns type of the scene node
-        virtual ESCENE_NODE_TYPE getType() const  { return ESNT_PARTICLE_SYSTEM; }
+//        //! Returns type of the scene node
+//        virtual ESCENE_NODE_TYPE getType() const  { return ESNT_PARTICLE_SYSTEM; }
 private:
         void reallocateBuffers();
-        core::list<IParticleAffector*> AffectorList;
+        core::list<MTAffector*> AffectorList;
         MTEmitter* Emitter;
-        core::array<SParticle> Particles;
+        core::array<MTParticle> Particles;
         core::dimension2d<f32> ParticleSize;
         u32 LastEmitTime;
         core::matrix4 LastAbsoluteTransformation;
