@@ -38,7 +38,7 @@ class Map;
 class IGameDef;
 class Environment;
 
-#define PARTICLE_BBOX
+//#define PARTICLE_BBOX
 #define PP(x) "("<<(x).X<<","<<(x).Y<<","<<(x).Z<<")"
 /*
 
@@ -118,7 +118,7 @@ public:
         s32 emitt(u32 now, u32 timeSinceLastCall, MTParticle*& outArray)
         {
                 dtime += timeSinceLastCall;
-                const u32 pps = (time > 0) ? time / amount : amount;
+                const u32 pps = (time > 0) ? amount / time : amount;
                 const f32 everyWhatMillisecond = 1000.0f / pps;
                 if (dtime > everyWhatMillisecond) {
                         Particles.set_used(0);
@@ -133,8 +133,8 @@ public:
                                 Particle.pos.Y = rand()/(float)RAND_MAX * extent.Y;
                                 Particle.pos.Z = rand()/(float)RAND_MAX * extent.Z - extent.Z/2;
 
-                                Particle.vector = random_v3f(minvel, maxvel) / BS;
-                                Particle.acc    = random_v3f(minacc, maxacc) / BS;
+                                Particle.vector = random_v3f(minvel, maxvel) / 100;
+                                Particle.acc    = random_v3f(minacc, maxacc) / 100;
 
                                 float exptime = random_f(minexptime, maxexptime);
                                 Particle.endTime = now + exptime * 1000;
@@ -234,7 +234,7 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 		// figure something out here or do it manually
 		ps->setAutomaticCulling(scene::EAC_OFF);
 
-		if (time != 0) {
+		if (time > 0) {
 			scene::ISceneNodeAnimator* pan =  m_smgr->createDeleteAnimator(time * 1000);
 			ps->addAnimator(pan);
 			pan->drop();
@@ -569,6 +569,7 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 						    Particles[i].pos,
 						    Particles[i].vector,
 						    acc);
+			}
 
 			Particles[i].pos += (Particles[i].vector * scale);
 			// this cant be very right, but must do for now.
@@ -584,7 +585,7 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 //				d = 0.0f;
 //			d = 1.0f - d;
 //			Particles[i].vector = Particles[i].startVector.getInterpolated(Particles[i].acc, d);
-			}
+
 
 			Buffer->BoundingBox.addInternalPoint(Particles[i].pos);
 			++i;
