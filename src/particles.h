@@ -71,19 +71,31 @@ private:
 #include "irrList.h"
 #include "SMeshBuffer.h"
 
-class MTEmitter;
-class MTAffector;
+//class MTEmitter;
+//class MTAffector;
+
+struct MTParticle : irr::scene::SParticle
+{
+	// acceleration
+	core::vector3df acc;
+};
+
+class MTEmitter : public io::IAttributeExchangingObject
+{
+public:
+	virtual s32 emitt(u32 now, u32 timeSinceLastCall, MTParticle*& outArray) = 0;
+};
+
+class MTAffector : public io::IAttributeExchangingObject
+{
+public:
+	virtual void affect(u32 now, MTParticle* particlearray, u32 count) = 0;
+};
 
 namespace irr
 {
 namespace scene
 {
-
-struct MTParticle : SParticle
-{
-	// acceleration
-	core::vector3df acc;
-};
 
 //! A particle system scene node.
 /** A scene node controlling a particle system. The behavior of the particles

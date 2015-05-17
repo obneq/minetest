@@ -44,66 +44,42 @@ class Environment;
 
 	Utility
 */
-v3f random_v3f(v3f min, v3f max)
-{
+v3f random_v3f(v3f min, v3f max) {
 	return v3f( rand()/(float)RAND_MAX*(max.X-min.X)+min.X,
-			rand()/(float)RAND_MAX*(max.Y-min.Y)+min.Y,
-			rand()/(float)RAND_MAX*(max.Z-min.Z)+min.Z);
+		    rand()/(float)RAND_MAX*(max.Y-min.Y)+min.Y,
+		    rand()/(float)RAND_MAX*(max.Z-min.Z)+min.Z);
 }
 
-class MTEmitter : public io::IAttributeExchangingObject
-{
-public:
-	virtual s32 emitt(u32 now, u32 timeSinceLastCall, scene::MTParticle*& outArray) = 0;
-
-};
-
-class MTAffector : public io::IAttributeExchangingObject
-{
-public:
-        virtual void affect(u32 now, irr::scene::MTParticle* particlearray, u32 count) = 0;
-};
+float random_f(float min, float max) {
+	return rand()/(float)RAND_MAX*(max-min)+min;
+}
 
 class FixNumEmitter :  public MTEmitter {
-private:
-        core::array<irr::scene::MTParticle> particles;
-
-        u32 number;
-        v3f pos;
-        u32 emitted;
 public:
-
         FixNumEmitter(int number) : number(number), emitted(0) {}
 
-        s32 emitt(u32 now, u32 timeSinceLastCall, irr::scene::MTParticle*& outArray)
+        s32 emitt(u32 now, u32 timeSinceLastCall, MTParticle*& outArray)
         {
                 if (emitted > 0) return 0;
 
                 particles.set_used(0);
+                MTParticle p;
+                for(u32 i=0; i<number; ++i) {
+                        p.pos = random_v3f(v3f(-0.25, -0.25, -0.25),
+                                           v3f(0.25, 0.25, 0.25));
 
-                irr::scene::MTParticle p;
-                for(u32 i=0; i<number; ++i)
-                {
-                        v3f particlepos = v3f(
-                                                rand() %100 /200. - 0.25,
-                                                rand() %100 /200. - 0.25,
-                                                rand() %100 /200. - 0.25);
-
-                        p.pos.set(particlepos);
-
-                        v3f velocity((rand() % 100 / 50. - 1) / 1.5,
-                                      rand() % 100 / 35.,
-                                     (rand() % 100 / 50. - 1) / 1.5);
-                        p.vector = velocity/100;
+                        v3f velocity = random_v3f(v3f(-0.666, 0, -0.666),
+                                                  v3f(0.666, 0.35, 0.666));
+                        p.vector  = velocity / 100;
                         p.startVector = p.vector;
                         p.acc = v3f(0, -0.1, 0);
 
                         p.startTime = now;
-                        p.endTime = now + 500 + (rand() % (2000 - 500));;
+                        p.endTime = now + random_f(500, 2000);
 
                         p.color = video::SColor(255.0, 255.0, 255.0, 255.0);
                         p.startColor = p.color;
-                        float size = rand() % 64 / 51.2;
+                        float size = random_f(0.2, 1);
                         p.startSize = core::dimension2d<f32>(size, size);
                         p.size = p.startSize;
                         particles.push_back(p);
@@ -113,6 +89,12 @@ public:
 
                 return particles.size();
         }
+private:
+        core::array<MTParticle> particles;
+
+        u32 number;
+        v3f pos;
+        u32 emitted;
 };
 
 class MTBoxEmitter : public MTEmitter {
@@ -133,22 +115,20 @@ public:
                 color = video::SColor(255.0, 255.0, 255.0, 255.0);
         }
 
-        s32 emitt(u32 now, u32 timeSinceLastCall, irr::scene::MTParticle*& outArray)
+        s32 emitt(u32 now, u32 timeSinceLastCall, MTParticle*& outArray)
         {
                 dtime += timeSinceLastCall;
                 const u32 pps = (time > 0) ? time / amount : amount;
                 const f32 everyWhatMillisecond = 1000.0f / pps;
-                if (dtime > everyWhatMillisecond)
-                {
+                if (dtime > everyWhatMillisecond) {
                         Particles.set_used(0);
                         u32 amount = (u32)((dtime / everyWhatMillisecond) + 0.5f);
                         dtime = 0;
-                        irr::scene::MTParticle Particle;
+                        MTParticle Particle;
 
                         if (amount > pps*2)
                                 amount = pps * 2;
-                        for (u32 i=0; i<amount; ++i)
-                        {
+                        for (u32 i=0; i<amount; ++i) {
                                 Particle.pos.X = rand()/(float)RAND_MAX * extent.X - extent.X/2;
                                 Particle.pos.Y = rand()/(float)RAND_MAX * extent.Y;
                                 Particle.pos.Z = rand()/(float)RAND_MAX * extent.Z - extent.Z/2;
@@ -156,21 +136,11 @@ public:
                                 Particle.vector = random_v3f(minvel, maxvel) / BS;
                                 Particle.acc    = random_v3f(minacc, maxacc) / BS;
 
-                                float exptime = minexptime;
-                                if (maxexptime != minexptime) {
-                                        exptime = rand()/(float)RAND_MAX
-                                                        *(maxexptime-minexptime)
-                                                        +minexptime;
-                                }
+                                float exptime = random_f(minexptime, maxexptime);
                                 Particle.endTime = now + exptime * 1000;
 
-                                float size = minsize;
-                                if (maxsize != minsize) {
-                                        size = rand()/(float)RAND_MAX
-                                                        *(maxsize-minsize)
-                                                        +minsize;
-                                }
-                                Particle.size = core::dimension2d<f32>(size, size);
+                                float size = random_f(minsize, maxsize);
+                                Particle.size = core::dimension2df(size, size);
 
                                 Particle.color = color;
                                 Particle.startColor = color;
@@ -192,45 +162,8 @@ private:
         u32 minsize, maxsize;
         video::SColor color;
 
-        core::array<irr::scene::MTParticle> Particles;
+        core::array<MTParticle> Particles;
         u32 dtime;
-};
-
-
-// this is mostly here because doing the same thing in the scene node itself
-// does not work now. once it does this can be entirely removed, but might be
-// useful to compare with node digging/punching particles.
-
-// MTAffector is only neede to make affectors that deal with MTParticles, which
-// have an additional field acceleration (why? can we lose it for 0.5?).
-class MTGravityAffector : public MTAffector //irr::scene::IParticleAffector
-{
-public:
-        MTGravityAffector(const core::vector3df& gravity, u32 timeForceLost)
-                : TimeForceLost(static_cast<f32>(timeForceLost)), Gravity(gravity)
-        {}
-
-////! Affects an array of particles.
-        void affect(u32 now, irr::scene::MTParticle* particlearray, u32 count)
-        {
-                f32 d;
-                for (u32 i=0; i<count; ++i)
-                {
-                        d = (now - particlearray[i].startTime) / TimeForceLost;
-                        if (d > 1.0f)
-                                d = 1.0f;
-                        if (d < 0.0f)
-                                d = 0.0f;
-                        d = 1.0f - d;
-                        particlearray[i].vector = particlearray[i].startVector.getInterpolated(Gravity, d);
-                }
-        }
-        virtual irr::scene::E_PARTICLE_AFFECTOR_TYPE getType() const {
-                return (irr::scene::E_PARTICLE_AFFECTOR_TYPE) (irr::scene::EPAT_COUNT+1);
-        }
-private:
-        f32 TimeForceLost;
-        v3f Gravity;
 };
 
 ParticleManager::ParticleManager(ClientEnvironment* env, irr::scene::ISceneManager* smgr) :
@@ -249,7 +182,6 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 	}
 
 	if (event->type == CE_ADD_PARTICLESPAWNER) {
-
 		scene::ISceneNode *node = m_smgr->getSceneNodeFromId(
 					event->delete_particlespawner.id);
 		if (node)
@@ -272,17 +204,20 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 						      *event->add_particlespawner.maxpos);
 		v3f pos = box.getCenter();
 		pos.Y = box.MinEdge.Y;
-
-		const v3f& extent = box.getExtent();
 		ps->setPosition(pos * BS);
 
+		// no list of particle spawners exists on mt side anymore,
+		// so maybe there is a need for a more unique id here.
 		ps->setID((s32) event->add_particlespawner.id);
 
 		f32 time = event->add_particlespawner.spawntime;
+
+		// hm should just be like
+		// new MTBoxEmitter(event->add_particlespawner, box.getExtent());
 		MTEmitter *em = new MTBoxEmitter(
 					event->add_particlespawner.amount,
 					time,
-					extent,
+					box.getExtent(),
 					*event->add_particlespawner.minvel,
 					*event->add_particlespawner.maxvel,
 					*event->add_particlespawner.minacc,
@@ -291,7 +226,6 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 					event->add_particlespawner.maxexptime,
 					event->add_particlespawner.minsize,
 					event->add_particlespawner.maxsize);
-
 		ps->setEmitter(em);
 		em->drop();
 
@@ -347,13 +281,7 @@ void ParticleManager::addNodeParticle(IGameDef* gamedef, LocalPlayer *player,
 	ps->setEmitter(em);
 	em->drop();
 
-	v3f particlepos = intToFloat(pos, BS);
-	ps->setPosition(particlepos);
-
-	// this looks fairly good, same thing in scene node looks bad. find out why?
-//	MTAffector* paf1 = new MTGravityAffector(v3f(0.0, -0.1, 0.0), 2000);
-//	ps->addAffector(paf1);
-//	paf1->drop();
+	ps->setPosition( intToFloat(pos, BS) );
 
 	scene::ISceneNodeAnimator* pan =  m_smgr->createDeleteAnimator(2000); //delete after max lifetime
 	ps->addAnimator(pan);
@@ -628,8 +556,9 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 		{
 			// this does not work properly atm, help needed.
 			if (collision_detection) {
-				v3f acc = v3f(0,0,0);
-				irr::scene::MTParticle p = Particles[i];
+				// this should not be needed
+				v3f acc(0, 0, 0);
+				MTParticle p = Particles[i];
 				float size = p.size.Width;
 				core::aabbox3d<f32> box = core::aabbox3d<f32>
 						(-size/2,-size/2,-size/2,size/2,size/2,size/2);
@@ -641,23 +570,22 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 						    Particles[i].vector,
 						    acc);
 
-			}
-			// hm this looks like shite, but it does look ok when in an
-			// affector.
+			Particles[i].pos += (Particles[i].vector * scale);
+			// this cant be very right, but must do for now.
+			Particles[i].vector += (Particles[i].acc * scale * 0.001);
 
+			// hm this looks like shit, but it does look ok when in an
+			// affector.
 //			f32 d;
-//			d = (now - Particles[i].startTime) / 200;
+//			d = (now - Particles[i].startTime) / 2000;
 //			if (d > 1.0f)
 //				d = 1.0f;
 //			if (d < 0.0f)
 //				d = 0.0f;
 //			d = 1.0f - d;
 //			Particles[i].vector = Particles[i].startVector.getInterpolated(Particles[i].acc, d);
+			}
 
-			// this cant be very right, but must do for now.
-			Particles[i].vector += (Particles[i].acc * scale * 0.001);
-
-			Particles[i].pos += (Particles[i].vector * scale);
 			Buffer->BoundingBox.addInternalPoint(Particles[i].pos);
 			++i;
 		}
