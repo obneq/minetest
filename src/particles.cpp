@@ -38,7 +38,7 @@ class Map;
 class IGameDef;
 class Environment;
 
-//#define PARTICLE_BBOX
+#define PARTICLE_BBOX
 #define PP(x) "("<<(x).X<<","<<(x).Y<<","<<(x).Z<<")"
 /*
 
@@ -70,9 +70,9 @@ public:
 
                         v3f velocity = random_v3f(v3f(-0.666, 0, -0.666),
                                                   v3f(0.666, 0.35, 0.666));
-                        p.vector  = velocity / 100;
+                        p.vector  = velocity;
                         p.startVector = p.vector;
-                        p.acc = v3f(0, -0.1, 0);
+                        p.acc = v3f(0, -0.9, 0);
 
                         p.startTime = now;
                         p.endTime = now + random_f(500, 2000);
@@ -133,8 +133,10 @@ public:
                                 Particle.pos.Y = rand()/(float)RAND_MAX * extent.Y;
                                 Particle.pos.Z = rand()/(float)RAND_MAX * extent.Z - extent.Z/2;
 
-                                Particle.vector = random_v3f(minvel, maxvel) / 100;
-                                Particle.acc    = random_v3f(minacc, maxacc) / 100;
+//                                std::cout << PP(Particle.pos) << std::endl;
+
+                                Particle.vector = random_v3f(minvel, maxvel);
+                                Particle.acc    = random_v3f(minacc, maxacc);
 
                                 float exptime = random_f(minexptime, maxexptime);
                                 Particle.endTime = now + exptime * 1000;
@@ -212,7 +214,7 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 
 		f32 time = event->add_particlespawner.spawntime;
 
-		// hm should just be like
+		// hm could just be like
 		// new MTBoxEmitter(event->add_particlespawner, box.getExtent());
 		MTEmitter *em = new MTBoxEmitter(
 					event->add_particlespawner.amount,
@@ -551,13 +553,9 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 			// can cause noticable freezes.
 			Particles[i] = Particles[Particles.size()-1];
 			Particles.erase( Particles.size()-1 );
-		}
-		else
-		{
-			// this does not work properly atm, help needed.
+		} else {
 			if (collision_detection) {
 				// this should not be needed
-				v3f acc(0, 0, 0);
 				MTParticle p = Particles[i];
 				float size = p.size.Width;
 				core::aabbox3d<f32> box = core::aabbox3d<f32>
@@ -565,28 +563,16 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 
 				collisionMoveSimple(m_env, m_gamedef,
 						    BS * 0.5, box,
-						    0, timediff,
+						    0, scale,
 						    Particles[i].pos,
 						    Particles[i].vector,
-						    acc);
-			}
+						    Particles[i].acc);
+			} else {
 
+			Particles[i].vector += (Particles[i].acc * scale);
 			Particles[i].pos += (Particles[i].vector * scale);
-			// this cant be very right, but must do for now.
-			Particles[i].vector += (Particles[i].acc * scale * 0.001);
 
-			// hm this looks like shit, but it does look ok when in an
-			// affector.
-//			f32 d;
-//			d = (now - Particles[i].startTime) / 2000;
-//			if (d > 1.0f)
-//				d = 1.0f;
-//			if (d < 0.0f)
-//				d = 0.0f;
-//			d = 1.0f - d;
-//			Particles[i].vector = Particles[i].startVector.getInterpolated(Particles[i].acc, d);
-
-
+			}
 			Buffer->BoundingBox.addInternalPoint(Particles[i].pos);
 			++i;
 		}
