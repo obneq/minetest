@@ -38,7 +38,7 @@ class Map;
 class IGameDef;
 class Environment;
 
-#define PARTICLE_BBOX
+//#define PARTICLE_BBOX
 #define PP(x) "("<<(x).X<<","<<(x).Y<<","<<(x).Z<<")"
 /*
 
@@ -101,12 +101,14 @@ class MTBoxEmitter : public MTEmitter {
 public:
         MTBoxEmitter(u32 amount, u32 time,
                        const v3f& extent,
+                       //v3f& minpos, v3f& maxpos,
                        v3f& minvel, v3f& maxvel,
                        v3f& minacc, v3f& maxacc,
                        u32 minexptime, u32 maxexptime,
                        u32 minsize, u32 maxsize)
                 : amount(amount), time(time),
                   extent(extent),
+                  //minpos(minpos), maxpos(maxpos),
                   minvel(minvel), maxvel(maxvel),
                   minacc(minacc), maxacc(maxacc),
                   minexptime(minexptime), maxexptime(maxexptime),
@@ -124,31 +126,49 @@ public:
                         Particles.set_used(0);
                         u32 amount = (u32)((dtime / everyWhatMillisecond) + 0.5f);
                         dtime = 0;
-                        MTParticle Particle;
+                        MTParticle p;
 
                         if (amount > pps*2)
                                 amount = pps * 2;
                         for (u32 i=0; i<amount; ++i) {
-                                Particle.pos.X = rand()/(float)RAND_MAX * extent.X - extent.X/2;
-                                Particle.pos.Y = rand()/(float)RAND_MAX * extent.Y;
-                                Particle.pos.Z = rand()/(float)RAND_MAX * extent.Z - extent.Z/2;
 
-//                                std::cout << PP(Particle.pos) << std::endl;
 
-                                Particle.vector = random_v3f(minvel, maxvel);
-                                Particle.acc    = random_v3f(minacc, maxacc);
+
+
+
+//				 p.pos = random_v3f(minpos, maxpos);
+//				 p.vector = random_v3f(minvel, maxvel);
+//				 p.acc = random_v3f(minacc, maxacc);
+//				 p.endTime = rand()/(float)RAND_MAX
+//						*(maxexptime-minexptime)
+//						+minexptime;
+//				 float size = rand()/(float)RAND_MAX
+//						*(maxsize-minsize)
+//						+minsize;
+//				 p.size = core::dimension2df(size, size);
+
+
+
+
+
+                                p.pos.X = rand()/(float)RAND_MAX * extent.X - extent.X/2;
+                                p.pos.Y = rand()/(float)RAND_MAX * extent.Y;
+                                p.pos.Z = rand()/(float)RAND_MAX * extent.Z - extent.Z/2;
+
+                                p.vector = random_v3f(minvel, maxvel);
+                                p.acc    = random_v3f(minacc, maxacc);
 
                                 float exptime = random_f(minexptime, maxexptime);
-                                Particle.endTime = now + exptime * 1000;
+                                p.endTime = now + exptime * 1000;
 
                                 float size = random_f(minsize, maxsize);
-                                Particle.size = core::dimension2df(size, size);
+                                p.size = core::dimension2df(size, size);
 
-                                Particle.color = color;
-                                Particle.startColor = color;
-                                Particle.startVector = Particle.vector;
+                                p.color = color;
+                                p.startColor = color;
+                                p.startVector = p.vector;
 
-                                Particles.push_back(Particle);
+                                Particles.push_back(p);
                         }
                         outArray = Particles.pointer();
                         return Particles.size();
@@ -158,6 +178,7 @@ public:
 private:
         u32 amount, time;
         v3f extent;
+        //v3f minpos, maxpos;
         v3f minvel, maxvel;
         v3f minacc, maxacc;
         u32 minexptime, maxexptime;
@@ -208,8 +229,8 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 		pos.Y = box.MinEdge.Y;
 		ps->setPosition(pos * BS);
 
-		// no list of particle spawners exists on mt side anymore,
-		// so maybe there is a need for a more unique id here.
+		// no list of particle spawners exists on mt side,
+		// so maybe there is a need for a more unique id
 		ps->setID((s32) event->add_particlespawner.id);
 
 		f32 time = event->add_particlespawner.spawntime;
@@ -219,7 +240,7 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 		MTEmitter *em = new MTBoxEmitter(
 					event->add_particlespawner.amount,
 					time,
-					box.getExtent(),
+					box.getExtent() * BS,
 					*event->add_particlespawner.minvel,
 					*event->add_particlespawner.maxvel,
 					*event->add_particlespawner.minacc,
@@ -254,13 +275,13 @@ void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 void ParticleManager::addDiggingParticles(IGameDef* gamedef, LocalPlayer *player,
 					  v3s16 pos, const TileSpec tiles[])
 {
-	addNodeParticle(gamedef, player, pos, tiles, 32);
+	addNodeParticle(gamedef, player, pos, tiles, 64);
 }
 
 void ParticleManager::addPunchingParticles(IGameDef* gamedef, LocalPlayer *player,
 					   v3s16 pos, const TileSpec tiles[])
 {
-	addNodeParticle(gamedef, player, pos, tiles, 1);
+	addNodeParticle(gamedef, player, pos, tiles, 2);
 }
 
 void ParticleManager::addNodeParticle(IGameDef* gamedef, LocalPlayer *player,
@@ -495,6 +516,24 @@ const core::aabbox3d<f32>& CParticleSystemSceneNode2::getBoundingBox() const
 	return Buffer->getBoundingBox();
 }
 
+void moveSimple(f32 dtime, v3f &pos_f,
+		v3f &speed_f, v3f &accel_f)
+{
+	//Calculate new velocity
+	if( dtime > 0.5 )
+		dtime = 0.5;
+	speed_f += accel_f * dtime;
+
+	if(speed_f.getLength() == 0)
+		return;
+
+	// Limit speed
+	speed_f.Y=rangelim(speed_f.Y,-5000,5000);
+	speed_f.X=rangelim(speed_f.X,-5000,5000);
+	speed_f.Z=rangelim(speed_f.Z,-5000,5000);
+	pos_f += speed_f * dtime;
+}
+
 void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 {
 	if (LastEmitTime==0)
@@ -541,7 +580,6 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 	else
 		Buffer->BoundingBox.reset(core::vector3df(0,0,0));
 	// animate all particles
-	f32 scale = (f32)timediff;
 	for (u32 i=0; i<Particles.size();)
 	{
 		// erase is pretty expensive!
@@ -554,29 +592,25 @@ void CParticleSystemSceneNode2::doParticleSystem(u32 time)
 			Particles[i] = Particles[Particles.size()-1];
 			Particles.erase( Particles.size()-1 );
 		} else {
+			MTParticle p = Particles[i];
 			if (collision_detection) {
-				// this should not be needed
-				MTParticle p = Particles[i];
 				float size = p.size.Width;
 				core::aabbox3d<f32> box = core::aabbox3d<f32>
 						(-size/2,-size/2,-size/2,size/2,size/2,size/2);
 
 				collisionMoveSimple(m_env, m_gamedef,
-						    BS * 0.5, box,
-						    0, scale,
-						    Particles[i].pos,
-						    Particles[i].vector,
-						    Particles[i].acc);
+						    BS * 0.125, box,
+						    0, timediff,
+						    p.pos, p.vector, p.acc);
 			} else {
-
-			Particles[i].vector += (Particles[i].acc * scale);
-			Particles[i].pos += (Particles[i].vector * scale);
-
+				moveSimple(timediff, p.pos, p.vector, p.acc);
 			}
-			Buffer->BoundingBox.addInternalPoint(Particles[i].pos);
+			Particles[i] = p;
+			Buffer->BoundingBox.addInternalPoint(p.pos);
 			++i;
 		}
 	}
+
 	const f32 m = (ParticleSize.Width > ParticleSize.Height ? ParticleSize.Width : ParticleSize.Height) * 0.5f;
 	Buffer->BoundingBox.MaxEdge.X += m;
 	Buffer->BoundingBox.MaxEdge.Y += m;
