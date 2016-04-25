@@ -4,8 +4,8 @@
 local WARN_INIT = false
 
 
-local function warn(message)
-	print(os.date("%H:%M:%S: WARNING: ")..message)
+function core.global_exists(name)
+	return rawget(_G, name) ~= nil
 end
 
 
@@ -22,7 +22,7 @@ function meta:__newindex(name, value)
 				info.currentline, name)
 		if not warned[warn_key] and info.what ~= "main" and
 				info.what ~= "C" then
-			warn(("Assignment to undeclared "..
+			core.log("warning", ("Assignment to undeclared "..
 					"global %q inside a function at %s.")
 				:format(name, desc))
 			warned[warn_key] = true
@@ -30,9 +30,8 @@ function meta:__newindex(name, value)
 		declared[name] = true
 	end
 	-- Ignore mod namespaces
-	if WARN_INIT and (not core.get_current_modname or
-			name ~= core.get_current_modname()) then
-		warn(("Global variable %q created at %s.")
+	if WARN_INIT and name ~= core.get_current_modname() then
+		core.log("warning", ("Global variable %q created at %s.")
 			:format(name, desc))
 	end
 	rawset(self, name, value)
@@ -43,7 +42,7 @@ function meta:__index(name)
 	local info = debug.getinfo(2, "Sl")
 	local warn_key = ("%s\0%d\0%s"):format(info.source, info.currentline, name)
 	if not declared[name] and not warned[warn_key] and info.what ~= "C" then
-		warn(("Undeclared global variable %q accessed at %s:%s")
+		core.log("warning", ("Undeclared global variable %q accessed at %s:%s")
 				:format(name, info.short_src, info.currentline))
 		warned[warn_key] = true
 	end

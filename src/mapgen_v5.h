@@ -1,6 +1,7 @@
 /*
 Minetest
-Copyright (C) 2010-2013 kwolekr, Ryan Kwolek <kwolekr@minetest.net>
+Copyright (C) 2010-2015 kwolekr, Ryan Kwolek <kwolekr@minetest.net>
+Copyright (C) 2010-2015 paramat, Matt Gregory
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU Lesser General Public License as published by
@@ -22,10 +23,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "mapgen.h"
 
-#define LARGE_CAVE_DEPTH -256
-
-/////////////////// Mapgen V5 flags
-//#define MGV5_   0x01
+#define MGV5_LARGE_CAVE_DEPTH -256
 
 class BiomeManager;
 
@@ -55,7 +53,7 @@ public:
 	BiomeManager *bmgr;
 
 	int ystride;
-	int zstride;
+	int zstride_1d;
 	u32 spflags;
 
 	v3s16 node_min;
@@ -69,33 +67,33 @@ public:
 	Noise *noise_cave1;
 	Noise *noise_cave2;
 	Noise *noise_ground;
+
 	Noise *noise_heat;
 	Noise *noise_humidity;
+	Noise *noise_heat_blend;
+	Noise *noise_humidity_blend;
 
 	content_t c_stone;
-	content_t c_dirt;
-	content_t c_dirt_with_grass;
-	content_t c_sand;
 	content_t c_water_source;
 	content_t c_lava_source;
-	content_t c_ice;
-	content_t c_gravel;
-	content_t c_cobble;
-	content_t c_desert_sand;
 	content_t c_desert_stone;
-	content_t c_mossycobble;
-	content_t c_sandbrick;
+	content_t c_ice;
+	content_t c_sandstone;
+
+	content_t c_cobble;
 	content_t c_stair_cobble;
-	content_t c_stair_sandstone;
+	content_t c_mossycobble;
+	content_t c_sandstonebrick;
+	content_t c_stair_sandstonebrick;
 
 	MapgenV5(int mapgenid, MapgenParams *params, EmergeManager *emerge);
 	~MapgenV5();
 
 	virtual void makeChunk(BlockMakeData *data);
-	int getGroundLevelAtPoint(v2s16 p);
+	int getSpawnLevelAtPoint(v2s16 p);
 	void calculateNoise();
 	int generateBaseTerrain();
-	bool generateBiomes(float *heat_map, float *humidity_map);
+	MgStoneType generateBiomes(float *heat_map, float *humidity_map);
 	void generateCaves(int max_stone_y);
 	void dustTopNodes();
 };

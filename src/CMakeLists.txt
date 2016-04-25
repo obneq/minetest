@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 2.6)
 
-project(Minetest)
-string(TOLOWER ${PROJECT_NAME} PROJECT_NAME_LOWER)
+project(minetest)
 
 INCLUDE(CheckIncludeFiles)
 
@@ -28,6 +27,12 @@ set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
 mark_as_advanced(EXECUTABLE_OUTPUT_PATH LIBRARY_OUTPUT_PATH)
 
 
+if(NOT (BUILD_CLIENT OR BUILD_SERVER))
+	message(WARNING "Neither BUILD_CLIENT nor BUILD_SERVER is set! Setting BUILD_SERVER=true")
+	set(BUILD_SERVER TRUE)
+endif()
+
+
 option(ENABLE_CURL "Enable cURL support for fetching media" TRUE)
 set(USE_CURL FALSE)
 
@@ -39,6 +44,15 @@ if(ENABLE_CURL)
 	endif()
 else()
 	mark_as_advanced(CLEAR CURL_LIBRARY CURL_INCLUDE_DIR)
+endif()
+
+if(NOT USE_CURL)
+	if(BUILD_CLIENT)
+		message(WARNING "cURL is required to load the server list")
+	endif()
+	if(BUILD_SERVER)
+		message(WARNING "cURL is required to announce to the server list")
+	endif()
 endif()
 
 
@@ -111,32 +125,69 @@ option(ENABLE_FREETYPE "Enable FreeType2 (TrueType fonts and basic unicode suppo
 set(USE_FREETYPE FALSE)
 
 if(ENABLE_FREETYPE)
-	if(UNIX)
-		include(FindPkgConfig)
-		if(PKG_CONFIG_FOUND)
-			pkg_check_modules(FREETYPE QUIET freetype2)
-			if(FREETYPE_FOUND)
-				SET(FREETYPE_PKGCONFIG_FOUND TRUE)
-				SET(FREETYPE_LIBRARY ${FREETYPE_LIBRARIES})
-				# Because CMake is idiotic
-				string(REPLACE ";" " " FREETYPE_CFLAGS_STR ${FREETYPE_CFLAGS})
-				string(REPLACE ";" " " FREETYPE_LDFLAGS_STR ${FREETYPE_LDFLAGS})
-			endif(FREETYPE_FOUND)
-		endif(PKG_CONFIG_FOUND)
-	endif(UNIX)
-	if(NOT FREETYPE_FOUND)
-		find_package(Freetype)
-	endif()
+##
+## Note: FindFreetype.cmake seems to have been fixed in recent versions of
+## CMake. If issues persist, re-enable this workaround specificially for the
+## failing platforms.
+##
+#	if(UNIX)
+#		include(FindPkgConfig)
+#		if(PKG_CONFIG_FOUND)
+#			pkg_check_modules(FREETYPE QUIET freetype2)
+#			if(FREETYPE_FOUND)
+#				SET(FREETYPE_PKGCONFIG_FOUND TRUE)
+#				SET(FREETYPE_LIBRARY ${FREETYPE_LIBRARIES})
+#				# Because CMake is idiotic
+#				string(REPLACE ";" " " FREETYPE_CFLAGS_STR ${FREETYPE_CFLAGS})
+#				string(REPLACE ";" " " FREETYPE_LDFLAGS_STR ${FREETYPE_LDFLAGS})
+#			endif(FREETYPE_FOUND)
+#		endif(PKG_CONFIG_FOUND)
+#	endif(UNIX)
+#	if(NOT FREETYPE_FOUND)
+#		find_package(Freetype)
+#	endif()
+	find_package(Freetype)
 	if(FREETYPE_FOUND)
+		message(STATUS "Freetype enabled.")
 		set(USE_FREETYPE TRUE)
 		set(CGUITTFONT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cguittfont")
 		set(CGUITTFONT_LIBRARY cguittfont)
 	endif()
 endif(ENABLE_FREETYPE)
 
+# LuaJIT
+option(ENABLE_LUAJIT "Enable LuaJIT support" TRUE)
+set(USE_LUAJIT FALSE)
+if(ENABLE_LUAJIT)
+	find_package(LuaJIT)
+	if(LUAJIT_FOUND)
+		set(USE_LUAJIT TRUE)
+	endif(LUAJIT_FOUND)
+else()
+	message (STATUS "LuaJIT detection disabled! (ENABLE_LUAJIT=0)")
+endif()
+if(NOT USE_LUAJIT)
+	message(STATUS "LuaJIT not found, using bundled Lua.")
+	set(LUA_LIBRARY "lua")
+	set(LUA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/lua/src")
+	add_subdirectory(lua)
+endif()
 
-find_package(Lua REQUIRED)
+find_package(GMP REQUIRED)
 
+option(ENABLE_CURSES "Enable ncurses console" TRUE)
+set(USE_CURSES FALSE)
+
+if(ENABLE_CURSES)
+	find_package(Ncursesw)
+	if(CURSES_FOUND)
+		set(USE_CURSES TRUE)
+		message(STATUS "ncurses console enabled.")
+		include_directories(${CURSES_INCLUDE_DIRS})
+	else()
+		message(STATUS "ncurses not found!")
+	endif()
+endif(ENABLE_CURSES)
 
 option(ENABLE_LEVELDB "Enable LevelDB backend" TRUE)
 set(USE_LEVELDB FALSE)
@@ -173,6 +224,21 @@ endif(ENABLE_REDIS)
 find_package(SQLite3 REQUIRED)
 find_package(Json REQUIRED)
 
+OPTION(ENABLE_SPATIAL "Enable SpatialIndex AreaStore backend" TRUE)
+set(USE_SPATIAL FALSE)
+
+if(ENABLE_SPATIAL)
+	find_library(SPATIAL_LIBRARY spatialindex)
+	find_path(SPATIAL_INCLUDE_DIR spatialindex/SpatialIndex.h)
+	if(SPATIAL_LIBRARY AND SPATIAL_INCLUDE_DIR)
+		set(USE_SPATIAL TRUE)
+		message(STATUS "SpatialIndex AreaStore backend enabled.")
+		include_directories(${SPATIAL_INCLUDE_DIR})
+	else(SPATIAL_LIBRARY AND SPATIAL_INCLUDE_DIR)
+		message(STATUS "SpatialIndex not found!")
+	endif(SPATIAL_LIBRARY AND SPATIAL_INCLUDE_DIR)
+endif(ENABLE_SPATIAL)
+
 
 if(NOT MSVC)
 	set(USE_GPROF FALSE CACHE BOOL "Use -pg flag for g++")
@@ -188,8 +254,10 @@ if(WIN32)
 		# Surpress some useless warnings
 		add_definitions ( /D "_CRT_SECURE_NO_DEPRECATE" /W1 )
 	else() # Probably MinGW = GCC
-		set(PLATFORM_LIBS ws2_32.lib)
+		set(PLATFORM_LIBS "")
 	endif()
+	set(PLATFORM_LIBS ws2_32.lib shlwapi.lib ${PLATFORM_LIBS})
+
 	# Zlib stuff
 	set(ZLIB_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/../../zlib/zlib-1.2.5"
 			CACHE PATH "Zlib include directory")
@@ -240,11 +308,18 @@ else()
 	else()
 		set(PLATFORM_LIBS -lrt ${PLATFORM_LIBS})
 	endif(APPLE)
-	#set(CLIENT_PLATFORM_LIBS -lXxf86vm)
+
 	# This way Xxf86vm is found on OpenBSD too
 	find_library(XXF86VM_LIBRARY Xxf86vm)
 	mark_as_advanced(XXF86VM_LIBRARY)
 	set(CLIENT_PLATFORM_LIBS ${CLIENT_PLATFORM_LIBS} ${XXF86VM_LIBRARY})
+
+	# Prefer local iconv if installed
+	find_library(ICONV_LIBRARY iconv)
+	mark_as_advanced(ICONV_LIBRARY)
+	if (ICONV_LIBRARY)
+		set(PLATFORM_LIBS ${PLATFORM_LIBS} ${ICONV_LIBRARY})
+	endif()
 endif()
 
 check_include_files(endian.h HAVE_ENDIAN_H)
@@ -261,24 +336,21 @@ add_custom_target(GenerateVersion
 	-D "GENERATE_VERSION_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
 	-D "GENERATE_VERSION_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
 	-D "VERSION_STRING=${VERSION_STRING}"
-	-D "VERSION_EXTRA=${VERSION_EXTRA}"
+	-D "DEVELOPMENT_BUILD=${DEVELOPMENT_BUILD}"
 	-P "${CMAKE_SOURCE_DIR}/cmake/Modules/GenerateVersion.cmake"
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 
-add_subdirectory(jthread)
+add_subdirectory(threading)
 add_subdirectory(network)
 add_subdirectory(script)
+add_subdirectory(unittest)
 add_subdirectory(util)
-
-
-set (unittests_SRCS
-	test.cpp
-)
 
 set(common_SRCS
 	ban.cpp
 	cavegen.cpp
+	chat.cpp
 	clientiface.cpp
 	collision.cpp
 	content_abm.cpp
@@ -309,10 +381,13 @@ set(common_SRCS
 	map.cpp
 	mapblock.cpp
 	mapgen.cpp
+	mapgen_flat.cpp
+	mapgen_fractal.cpp
 	mapgen_singlenode.cpp
 	mapgen_v5.cpp
 	mapgen_v6.cpp
 	mapgen_v7.cpp
+	mapgen_valleys.cpp
 	mapnode.cpp
 	mapsector.cpp
 	mg_biome.cpp
@@ -325,10 +400,12 @@ set(common_SRCS
 	nodemetadata.cpp
 	nodetimer.cpp
 	noise.cpp
+	objdef.cpp
 	object_properties.cpp
 	pathfinder.cpp
 	player.cpp
 	porting.cpp
+	profiler.cpp
 	quicktune.cpp
 	rollback.cpp
 	rollback_interface.cpp
@@ -341,6 +418,7 @@ set(common_SRCS
 	sound.cpp
 	staticobject.cpp
 	subgame.cpp
+	terminal_chat_console.cpp
 	tool.cpp
 	treegen.cpp
 	version.cpp
@@ -350,7 +428,7 @@ set(common_SRCS
 	${JTHREAD_SRCS}
 	${common_SCRIPT_SRCS}
 	${UTIL_SRCS}
-	${unittests_SRCS}
+	${UNITTEST_SRCS}
 )
 
 
@@ -385,7 +463,6 @@ set(client_SRCS
 	${sound_SRCS}
 	${client_network_SRCS}
 	camera.cpp
-	chat.cpp
 	client.cpp
 	clientmap.cpp
 	clientmedia.cpp
@@ -405,14 +482,18 @@ set(client_SRCS
 	guiFormSpecMenu.cpp
 	guiKeyChangeMenu.cpp
 	guiPasswordChange.cpp
+	guiscalingfilter.cpp
 	guiTable.cpp
 	guiVolumeChange.cpp
 	hud.cpp
+	imagefilters.cpp
+	intlGUIEditBox.cpp
 	keycode.cpp
 	localplayer.cpp
 	main.cpp
 	mapblock_mesh.cpp
 	mesh.cpp
+	minimap.cpp
 	particles.cpp
 	shader.cpp
 	sky.cpp
@@ -439,6 +520,7 @@ include_directories(
 	${SOUND_INCLUDE_DIRS}
 	${SQLITE3_INCLUDE_DIR}
 	${LUA_INCLUDE_DIR}
+	${GMP_INCLUDE_DIR}
 	${JSON_INCLUDE_DIR}
 	${PROJECT_SOURCE_DIR}/script
 )
@@ -457,10 +539,10 @@ set(EXECUTABLE_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
 
 
 if(BUILD_CLIENT)
-	add_executable(${PROJECT_NAME_LOWER} ${client_SRCS})
-	add_dependencies(${PROJECT_NAME_LOWER} GenerateVersion)
+	add_executable(${PROJECT_NAME} ${client_SRCS})
+	add_dependencies(${PROJECT_NAME} GenerateVersion)
 	set(client_LIBS
-		${PROJECT_NAME_LOWER}
+		${PROJECT_NAME}
 		${ZLIB_LIBRARIES}
 		${IRRLICHT_LIBRARY}
 		${OPENGL_LIBRARIES}
@@ -472,6 +554,7 @@ if(BUILD_CLIENT)
 		${SOUND_LIBRARIES}
 		${SQLITE3_LIBRARY}
 		${LUA_LIBRARY}
+		${GMP_LIBRARY}
 		${JSON_LIBRARY}
 		${OPENGLES2_LIBRARIES}
 		${PLATFORM_LIBS}
@@ -489,55 +572,68 @@ if(BUILD_CLIENT)
 	endif()
 	if(USE_CURL)
 		target_link_libraries(
-			${PROJECT_NAME_LOWER}
+			${PROJECT_NAME}
 			${CURL_LIBRARY}
 		)
 	endif()
 	if(USE_FREETYPE)
 		if(FREETYPE_PKGCONFIG_FOUND)
-			set_target_properties(${PROJECT_NAME_LOWER}
+			set_target_properties(${PROJECT_NAME}
 				PROPERTIES
 				COMPILE_FLAGS "${FREETYPE_CFLAGS_STR}"
 			)
 		endif()
 		target_link_libraries(
-			${PROJECT_NAME_LOWER}
+			${PROJECT_NAME}
 			${FREETYPE_LIBRARY}
 			${CGUITTFONT_LIBRARY}
 		)
 	endif()
+	if (USE_CURSES)
+		target_link_libraries(${PROJECT_NAME} ${CURSES_LIBRARIES})
+	endif()
 	if (USE_LEVELDB)
-		target_link_libraries(${PROJECT_NAME_LOWER} ${LEVELDB_LIBRARY})
+		target_link_libraries(${PROJECT_NAME} ${LEVELDB_LIBRARY})
 	endif()
 	if (USE_REDIS)
-		target_link_libraries(${PROJECT_NAME_LOWER} ${REDIS_LIBRARY})
+		target_link_libraries(${PROJECT_NAME} ${REDIS_LIBRARY})
+	endif()
+	if (USE_SPATIAL)
+		target_link_libraries(${PROJECT_NAME} ${SPATIAL_LIBRARY})
 	endif()
 endif(BUILD_CLIENT)
 
 
 if(BUILD_SERVER)
-	add_executable(${PROJECT_NAME_LOWER}server ${server_SRCS})
-	add_dependencies(${PROJECT_NAME_LOWER}server GenerateVersion)
+	add_executable(${PROJECT_NAME}server ${server_SRCS})
+	add_dependencies(${PROJECT_NAME}server GenerateVersion)
 	target_link_libraries(
-		${PROJECT_NAME_LOWER}server
+		${PROJECT_NAME}server
 		${ZLIB_LIBRARIES}
 		${SQLITE3_LIBRARY}
 		${JSON_LIBRARY}
 		${GETTEXT_LIBRARY}
 		${LUA_LIBRARY}
+		${GMP_LIBRARY}
 		${PLATFORM_LIBS}
 	)
-	set_target_properties(${PROJECT_NAME_LOWER}server PROPERTIES
+	set_target_properties(${PROJECT_NAME}server PROPERTIES
 			COMPILE_DEFINITIONS "SERVER")
+	if (USE_CURSES)
+		target_link_libraries(${PROJECT_NAME}server ${CURSES_LIBRARIES})
+	endif()
 	if (USE_LEVELDB)
-		target_link_libraries(${PROJECT_NAME_LOWER}server ${LEVELDB_LIBRARY})
+		target_link_libraries(${PROJECT_NAME}server ${LEVELDB_LIBRARY})
 	endif()
 	if (USE_REDIS)
-		target_link_libraries(${PROJECT_NAME_LOWER}server ${REDIS_LIBRARY})
+		target_link_libraries(${PROJECT_NAME}server ${REDIS_LIBRARY})
+	endif()
+	if (USE_SPATIAL)
+		target_link_libraries(${PROJECT_NAME}server ${SPATIAL_LIBRARY})
 	endif()
 	if(USE_CURL)
 		target_link_libraries(
-			${PROJECT_NAME_LOWER}server
+			${PROJECT_NAME}server
 			${CURL_LIBRARY}
 		)
 	endif()
@@ -579,6 +675,7 @@ else()
 	if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 		# clang does not understand __extern_always_inline but libc headers use it
 		set(OTHER_FLAGS "${OTHER_FLAGS} \"-D__extern_always_inline=extern __always_inline\"")
+		set(OTHER_FLAGS "${OTHER_FLAGS} -Wsign-compare")
 	endif()
 
 	if(MINGW)
@@ -638,7 +735,7 @@ if(WIN32)
 endif()
 
 if(BUILD_CLIENT)
-	install(TARGETS ${PROJECT_NAME_LOWER}
+	install(TARGETS ${PROJECT_NAME}
 		RUNTIME DESTINATION ${BINDIR}
 		LIBRARY DESTINATION ${BINDIR}
 		ARCHIVE DESTINATION ${BINDIR}
@@ -656,7 +753,7 @@ if(BUILD_CLIENT)
 	if(USE_GETTEXT)
 		foreach(LOCALE ${GETTEXT_AVAILABLE_LOCALES})
 			set_mo_paths(MO_BUILD_PATH MO_DEST_PATH ${LOCALE})
-			set(MO_BUILD_PATH "${MO_BUILD_PATH}/${PROJECT_NAME_LOWER}.mo")
+			set(MO_BUILD_PATH "${MO_BUILD_PATH}/${PROJECT_NAME}.mo")
 			install(FILES ${MO_BUILD_PATH} DESTINATION ${MO_DEST_PATH})
 		endforeach()
 	endif()
@@ -677,16 +774,16 @@ if(BUILD_CLIENT)
 endif(BUILD_CLIENT)
 
 if(BUILD_SERVER)
-	install(TARGETS ${PROJECT_NAME_LOWER}server DESTINATION ${BINDIR})
+	install(TARGETS ${PROJECT_NAME}server DESTINATION ${BINDIR})
 endif()
 
 if (USE_GETTEXT)
 	set(MO_FILES)
 
 	foreach(LOCALE ${GETTEXT_AVAILABLE_LOCALES})
-		set(PO_FILE_PATH "${GETTEXT_PO_PATH}/${LOCALE}/${PROJECT_NAME_LOWER}.po")
+		set(PO_FILE_PATH "${GETTEXT_PO_PATH}/${LOCALE}/${PROJECT_NAME}.po")
 		set_mo_paths(MO_BUILD_PATH MO_DEST_PATH ${LOCALE})
-		set(MO_FILE_PATH "${MO_BUILD_PATH}/${PROJECT_NAME_LOWER}.mo")
+		set(MO_FILE_PATH "${MO_BUILD_PATH}/${PROJECT_NAME}.mo")
 
 		add_custom_command(OUTPUT ${MO_BUILD_PATH}
 			COMMAND ${CMAKE_COMMAND} -E make_directory ${MO_BUILD_PATH}

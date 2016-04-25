@@ -1,6 +1,10 @@
 -- Minetest: builtin/misc_helpers.lua
 
 --------------------------------------------------------------------------------
+-- Localize functions to avoid table lookups (better performance).
+local string_sub, string_find = string.sub, string.find
+
+--------------------------------------------------------------------------------
 function basic_dump(o)
 	local tp = type(o)
 	if tp == "number" then
@@ -89,13 +93,13 @@ function dump2(o, name, dumped)
 				-- the form _G["table: 0xFFFFFFF"]
 				keyStr = string.format("_G[%q]", tostring(k))
 				-- Dump key table
-				table.insert(t, dump2(k, keyStr, dumped))
+				t[#t + 1] = dump2(k, keyStr, dumped)
 			end
 		else
 			keyStr = basic_dump(k)
 		end
 		local vname = string.format("%s[%s]", name, keyStr)
-		table.insert(t, dump2(v, vname, dumped))
+		t[#t + 1] = dump2(v, vname, dumped)
 	end
 	return string.format("%s = {}\n%s", name, table.concat(t))
 end
@@ -130,7 +134,7 @@ function dump(o, indent, nested, level)
 	local t = {}
 	local dumped_indexes = {}
 	for i, v in ipairs(o) do
-		table.insert(t, dump(v, indent, nested, level + 1))
+		t[#t + 1] = dump(v, indent, nested, level + 1)
 		dumped_indexes[i] = true
 	end
 	for k, v in pairs(o) do
@@ -139,7 +143,7 @@ function dump(o, indent, nested, level)
 				k = "["..dump(k, indent, nested, level + 1).."]"
 			end
 			v = dump(v, indent, nested, level + 1)
-			table.insert(t, k.." = "..v)
+			t[#t + 1] = k.." = "..v
 		end
 	end
 	nested[o] = nil
@@ -155,9 +159,6 @@ function dump(o, indent, nested, level)
 end
 
 --------------------------------------------------------------------------------
--- Localize functions to avoid table lookups (better performance).
-local table_insert = table.insert
-local str_sub, str_find = string.sub, string.find
 function string.split(str, delim, include_empty, max_splits, sep_is_pattern)
 	delim = delim or ","
 	max_splits = max_splits or -1
@@ -166,16 +167,16 @@ function string.split(str, delim, include_empty, max_splits, sep_is_pattern)
 	local plain = not sep_is_pattern
 	max_splits = max_splits + 1
 	repeat
-		local np, npe = str_find(str, delim, pos, plain)
+		local np, npe = string_find(str, delim, pos, plain)
 		np, npe = (np or (len+1)), (npe or (len+1))
 		if (not np) or (max_splits == 1) then
 			np = len + 1
 			npe = np
 		end
-		local s = str_sub(str, pos, np - 1)
+		local s = string_sub(str, pos, np - 1)
 		if include_empty or (s ~= "") then
 			max_splits = max_splits - 1
-			table_insert(items, s)
+			items[#items + 1] = s
 		end
 		pos = npe + 1
 	until (max_splits == 0) or (pos > (len + 1))
@@ -183,9 +184,22 @@ function string.split(str, delim, include_empty, max_splits, sep_is_pattern)
 end
 
 --------------------------------------------------------------------------------
+function table.indexof(list, val)
+	for i, v in ipairs(list) do
+		if v == val then
+			return i
+		end
+	end
+	return -1
+end
+
+assert(table.indexof({"foo", "bar"}, "foo") == 1)
+assert(table.indexof({"foo", "bar"}, "baz") == -1)
+
+--------------------------------------------------------------------------------
 function file_exists(filename)
 	local f = io.open(filename, "r")
-	if f==nil then
+	if f == nil then
 		return false
 	else
 		f:close()
@@ -298,8 +312,8 @@ function core.splittext(text,charlimit)
 
 	local current_idx = 1
 
-	local start,stop = string.find(text," ",current_idx)
-	local nl_start,nl_stop = string.find(text,"\n",current_idx)
+	local start,stop = string_find(text, " ", current_idx)
+	local nl_start,nl_stop = string_find(text, "\n", current_idx)
 	local gotnewline = false
 	if nl_start ~= nil and (start == nil or nl_start < start) then
 		start = nl_start
@@ -309,7 +323,7 @@ function core.splittext(text,charlimit)
 	local last_line = ""
 	while start ~= nil do
 		if string.len(last_line) + (stop-start) > charlimit then
-			table.insert(retval,last_line)
+			retval[#retval + 1] = last_line
 			last_line = ""
 		end
 
@@ -317,17 +331,17 @@ function core.splittext(text,charlimit)
 			last_line = last_line .. " "
 		end
 
-		last_line = last_line .. string.sub(text,current_idx,stop -1)
+		last_line = last_line .. string_sub(text, current_idx, stop - 1)
 
 		if gotnewline then
-			table.insert(retval,last_line)
+			retval[#retval + 1] = last_line
 			last_line = ""
 			gotnewline = false
 		end
 		current_idx = stop+1
 
-		start,stop = string.find(text," ",current_idx)
-		nl_start,nl_stop = string.find(text,"\n",current_idx)
+		start,stop = string_find(text, " ", current_idx)
+		nl_start,nl_stop = string_find(text, "\n", current_idx)
 
 		if nl_start ~= nil and (start == nil or nl_start < start) then
 			start = nl_start
@@ -338,11 +352,11 @@ function core.splittext(text,charlimit)
 
 	--add last part of text
 	if string.len(last_line) + (string.len(text) - current_idx) > charlimit then
-			table.insert(retval,last_line)
-			table.insert(retval,string.sub(text,current_idx))
+			retval[#retval + 1] = last_line
+			retval[#retval + 1] = string_sub(text, current_idx)
 	else
-		last_line = last_line .. " " .. string.sub(text,current_idx)
-		table.insert(retval,last_line)
+		last_line = last_line .. " " .. string_sub(text, current_idx)
+		retval[#retval + 1] = last_line
 	end
 
 	return retval
@@ -415,14 +429,14 @@ if INIT == "game" then
 
 		if iswall then
 			core.set_node(pos, {name = wield_name,
-					param2 = dirs1[fdir+1]})
+					param2 = dirs1[fdir + 1]})
 		elseif isceiling then
 			if orient_flags.force_facedir then
 				core.set_node(pos, {name = wield_name,
 						param2 = 20})
 			else
 				core.set_node(pos, {name = wield_name,
-						param2 = dirs2[fdir+1]})
+						param2 = dirs2[fdir + 1]})
 			end
 		else -- place right side up
 			if orient_flags.force_facedir then
@@ -538,6 +552,36 @@ end
 assert(core.string_to_pos("10.0, 5, -2").x == 10)
 assert(core.string_to_pos("( 10.0, 5, -2)").z == -2)
 assert(core.string_to_pos("asd, 5, -2)") == nil)
+
+--------------------------------------------------------------------------------
+function core.string_to_area(value)
+	local p1, p2 = unpack(value:split(") ("))
+	if p1 == nil or p2 == nil then
+		return nil
+	end
+
+	p1 = core.string_to_pos(p1 .. ")")
+	p2 = core.string_to_pos("(" .. p2)
+	if p1 == nil or p2 == nil then
+		return nil
+	end
+
+	return p1, p2
+end
+
+local function test_string_to_area()
+	local p1, p2 = core.string_to_area("(10.0, 5, -2) (  30.2,   4, -12.53)")
+	assert(p1.x == 10.0 and p1.y == 5 and p1.z == -2)
+	assert(p2.x == 30.2 and p2.y == 4 and p2.z == -12.53)
+
+	p1, p2 = core.string_to_area("(10.0, 5, -2  30.2,   4, -12.53")
+	assert(p1 == nil and p2 == nil)
+
+	p1, p2 = core.string_to_area("(10.0, 5,) -2  fgdf2,   4, -12.53")
+	assert(p1 == nil and p2 == nil)
+end
+
+test_string_to_area()
 
 --------------------------------------------------------------------------------
 function table.copy(t, seen)

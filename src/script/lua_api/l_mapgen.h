@@ -22,14 +22,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "lua_api/l_base.h"
 
-class INodeDefManager;
-struct NodeResolveInfo;
-class DecoSimple;
-class DecoSchematic;
-class SchematicManager;
-
 class ModApiMapgen : public ModApiBase {
 private:
+	// get_biome_id(biomename)
+	// returns the biome id used in biomemap
+	static int l_get_biome_id(lua_State *L);
+
 	// get_mapgen_object(objectname)
 	// returns the requested object used during map generation
 	static int l_get_mapgen_object(lua_State *L);
@@ -45,8 +43,14 @@ private:
 	// set_noiseparam_defaults(name, noiseparams, set_default)
 	static int l_set_noiseparams(lua_State *L);
 
+	// get_noiseparam_defaults(name)
+	static int l_get_noiseparams(lua_State *L);
+
 	// set_gen_notify(flagstring)
 	static int l_set_gen_notify(lua_State *L);
+
+	// set_gen_notify(flagstring)
+	static int l_get_gen_notify(lua_State *L);
 
 	// register_biome({lots of stuff})
 	static int l_register_biome(lua_State *L);
@@ -81,22 +85,26 @@ private:
 	// create_schematic(p1, p2, probability_list, filename)
 	static int l_create_schematic(lua_State *L);
 
-	// place_schematic(p, schematic, rotation, replacement)
+	// place_schematic(p, schematic, rotation, replacements, force_placement)
 	static int l_place_schematic(lua_State *L);
 
-	static bool regDecoSimple(lua_State *L,
-			NodeResolveInfo *nri, DecoSimple *deco);
-	static bool regDecoSchematic(lua_State *L,
-		SchematicManager *schemmgr, DecoSchematic *deco);
+	// place_schematic_on_vmanip(vm, p, schematic,
+	//     rotation, replacements, force_placement)
+	static int l_place_schematic_on_vmanip(lua_State *L);
+
+	// serialize_schematic(schematic, format, options={...})
+	static int l_serialize_schematic(lua_State *L);
+
+public:
+	static void Initialize(lua_State *L, int top);
 
 	static struct EnumString es_BiomeTerrainType[];
 	static struct EnumString es_DecorationType[];
 	static struct EnumString es_MapgenObject[];
 	static struct EnumString es_OreType[];
 	static struct EnumString es_Rotation[];
-
-public:
-	static void Initialize(lua_State *L, int top);
+	static struct EnumString es_SchematicFormatType[];
+	static struct EnumString es_NodeResolveMethod[];
 };
 
 #endif /* L_MAPGEN_H_ */

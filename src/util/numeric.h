@@ -20,14 +20,15 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #ifndef UTIL_NUMERIC_HEADER
 #define UTIL_NUMERIC_HEADER
 
+#include "basic_macros.h"
 #include "../irrlichttypes.h"
 #include "../irr_v2d.h"
 #include "../irr_v3d.h"
 #include "../irr_aabb3d.h"
+#include "../threading/mutex.h"
 #include <list>
 #include <map>
 #include <vector>
-#include <algorithm>
 
 
 /*
@@ -41,6 +42,7 @@ public:
 private:
 	static void generateFacePosition(u16 d);
 	static std::map<u16, std::vector<v3s16> > m_cache;
+	static Mutex m_cache_mutex;
 };
 
 class IndentationRaiser
@@ -164,9 +166,6 @@ inline v3s16 arealim(v3s16 p, s16 d)
 	return p;
 }
 
-#define ARRLEN(x) (sizeof(x) / sizeof((x)[0]))
-#define CONTAINS(c, v) (std::find((c).begin(), (c).end(), (v)) != (c).end())
-
 // The naive swap performs better than the xor version
 #define SWAP(t, x, y) do { \
 	t temp = x;            \
@@ -258,7 +257,7 @@ inline u32 get_bits(u32 x, u32 pos, u32 len)
 inline void set_bits(u32 *x, u32 pos, u32 len, u32 val)
 {
 	u32 mask = (1 << len) - 1;
-	*x &= ~(mask << len);
+	*x &= ~(mask << pos);
 	*x |= (val & mask) << pos;
 }
 
@@ -277,18 +276,12 @@ bool isBlockInSight(v3s16 blockpos_b, v3f camera_pos, v3f camera_dir,
 		f32 camera_fov, f32 range, f32 *distance_ptr=NULL);
 
 /*
-	Some helper stuff
-*/
-#define MYMIN(a,b) ((a)<(b)?(a):(b))
-#define MYMAX(a,b) ((a)>(b)?(a):(b))
-
-/*
 	Returns nearest 32-bit integer for given floating point number.
 	<cmath> and <math.h> in VC++ don't provide round().
 */
 inline s32 myround(f32 f)
 {
-	return floor(f + 0.5);
+	return (s32)(f < 0.f ? (f - 0.5f) : (f + 0.5f));
 }
 
 /*
@@ -317,9 +310,9 @@ inline v3f intToFloat(v3s16 p, f32 d)
 }
 
 // Random helper. Usually d=BS
-inline core::aabbox3d<f32> getNodeBox(v3s16 p, float d)
+inline aabb3f getNodeBox(v3s16 p, float d)
 {
-	return core::aabbox3d<f32>(
+	return aabb3f(
 		(float)p.X * d - 0.5*d,
 		(float)p.Y * d - 0.5*d,
 		(float)p.Z * d - 0.5*d,
@@ -411,5 +404,16 @@ inline bool is_power_of_two(u32 n)
 	return n != 0 && (n & (n-1)) == 0;
 }
 
-#endif
+// Compute next-higher power of 2 efficiently, e.g. for power-of-2 texture sizes.
+// Public Domain: https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
+inline u32 npot2(u32 orig) {
+	orig--;
+	orig |= orig >> 1;
+	orig |= orig >> 2;
+	orig |= orig >> 4;
+	orig |= orig >> 8;
+	orig |= orig >> 16;
+	return orig + 1;
+}
 
+#endif

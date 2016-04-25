@@ -74,6 +74,10 @@ class LuaPerlinNoiseMap : public ModApiBase {
 	static int l_get3dMap(lua_State *L);
 	static int l_get3dMap_flat(lua_State *L);
 
+	static int l_calc2dMap(lua_State *L);
+	static int l_calc3dMap(lua_State *L);
+	static int l_getMapSlice(lua_State *L);
+
 public:
 	LuaPerlinNoiseMap(NoiseParams *np, int seed, v3s16 size);
 
@@ -152,6 +156,39 @@ public:
 	static int create_object(lua_State *L);
 
 	static LuaPcgRandom *checkobject(lua_State *L, int narg);
+
+	static void Register(lua_State *L);
+};
+
+
+/*
+	LuaSecureRandom
+*/
+class LuaSecureRandom : public ModApiBase {
+private:
+	static const size_t RAND_BUF_SIZE = 2048;
+	static const char className[];
+	static const luaL_reg methods[];
+
+	u32 m_rand_idx;
+	char m_rand_buf[RAND_BUF_SIZE];
+
+	// Exported functions
+
+	// garbage collector
+	static int gc_object(lua_State *L);
+
+	// next_bytes(self, count) -> get count many bytes
+	static int l_next_bytes(lua_State *L);
+
+public:
+	bool fillRandBuf();
+
+	// LuaSecureRandom()
+	// Creates an LuaSecureRandom and leaves it on top of stack
+	static int create_object(lua_State *L);
+
+	static LuaSecureRandom *checkobject(lua_State *L, int narg);
 
 	static void Register(lua_State *L);
 };

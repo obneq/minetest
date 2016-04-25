@@ -21,15 +21,17 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define TILE_HEADER
 
 #include "irrlichttypes.h"
-#include "irr_v2d.h"
 #include "irr_v3d.h"
 #include <ITexture.h>
 #include <IrrlichtDevice.h>
 #include "threads.h"
 #include <string>
 #include <vector>
+#include "util/numeric.h"
 
 class IGameDef;
+struct TileSpec;
+struct TileDef;
 
 /*
 	tile.{h,cpp}: Texture handling stuff.
@@ -109,6 +111,8 @@ public:
 	virtual video::ITexture* generateTextureFromMesh(
 			const TextureFromMeshParams &params)=0;
 	virtual video::ITexture* getNormalTexture(const std::string &name)=0;
+	virtual video::SColor getTextureAverageColor(const std::string &name)=0;
+	virtual video::ITexture *getShaderFlagsTexture(bool normalmap_present)=0;
 };
 
 class IWritableTextureSource : public ITextureSource
@@ -130,26 +134,13 @@ public:
 	virtual void insertSourceImage(const std::string &name, video::IImage *img)=0;
 	virtual void rebuildImagesAndTextures()=0;
 	virtual video::ITexture* getNormalTexture(const std::string &name)=0;
+	virtual video::SColor getTextureAverageColor(const std::string &name)=0;
+	virtual video::ITexture *getShaderFlagsTexture(bool normalmap_present)=0;
 };
 
 IWritableTextureSource* createTextureSource(IrrlichtDevice *device);
 
 #ifdef __ANDROID__
-/**
- * @param size get next npot2 value
- * @return npot2 value
- */
-inline unsigned int npot2(unsigned int size)
-{
-	if (size == 0) return 0;
-	unsigned int npot = 1;
-
-	while ((size >>= 1) > 0) {
-		npot <<= 1;
-	}
-	return npot;
-}
-
 video::IImage * Align2Npot2(video::IImage * image, video::IVideoDriver* driver);
 #endif
 
@@ -174,6 +165,8 @@ enum MaterialType{
 // defined by extra parameters
 #define MATERIAL_FLAG_ANIMATION_VERTICAL_FRAMES 0x08
 #define MATERIAL_FLAG_HIGHLIGHTED 0x10
+#define MATERIAL_FLAG_TILEABLE_HORIZONTAL 0x20
+#define MATERIAL_FLAG_TILEABLE_VERTICAL 0x40
 
 /*
 	This fully defines the looks of a tile.
@@ -184,12 +177,14 @@ struct FrameSpec
 	FrameSpec():
 		texture_id(0),
 		texture(NULL),
-		normal_texture(NULL)
+		normal_texture(NULL),
+		flags_texture(NULL)
 	{
 	}
 	u32 texture_id;
 	video::ITexture *texture;
 	video::ITexture *normal_texture;
+	video::ITexture *flags_texture;
 };
 
 struct TileSpec
@@ -198,6 +193,7 @@ struct TileSpec
 		texture_id(0),
 		texture(NULL),
 		normal_texture(NULL),
+		flags_texture(NULL),
 		alpha(255),
 		material_type(TILE_MATERIAL_BASIC),
 		material_flags(
@@ -253,17 +249,32 @@ struct TileSpec
 		}
 		material.BackfaceCulling = (material_flags & MATERIAL_FLAG_BACKFACE_CULLING)
 			? true : false;
+		if (!(material_flags & MATERIAL_FLAG_TILEABLE_HORIZONTAL)) {
+			material.TextureLayer[0].TextureWrapU = video::ETC_CLAMP_TO_EDGE;
+		}
+		if (!(material_flags & MATERIAL_FLAG_TILEABLE_VERTICAL)) {
+			material.TextureLayer[0].TextureWrapV = video::ETC_CLAMP_TO_EDGE;
+		}
 	}
 
 	void applyMaterialOptionsWithShaders(video::SMaterial &material) const
 	{
 		material.BackfaceCulling = (material_flags & MATERIAL_FLAG_BACKFACE_CULLING)
 			? true : false;
+		if (!(material_flags & MATERIAL_FLAG_TILEABLE_HORIZONTAL)) {
+			material.TextureLayer[0].TextureWrapU = video::ETC_CLAMP_TO_EDGE;
+			material.TextureLayer[1].TextureWrapU = video::ETC_CLAMP_TO_EDGE;
+		}
+		if (!(material_flags & MATERIAL_FLAG_TILEABLE_VERTICAL)) {
+			material.TextureLayer[0].TextureWrapV = video::ETC_CLAMP_TO_EDGE;
+			material.TextureLayer[1].TextureWrapV = video::ETC_CLAMP_TO_EDGE;
+		}
 	}
 	
 	u32 texture_id;
 	video::ITexture *texture;
 	video::ITexture *normal_texture;
+	video::ITexture *flags_texture;
 	
 	// Vertex alpha (when MATERIAL_ALPHA_VERTEX is used)
 	u8 alpha;
@@ -278,5 +289,4 @@ struct TileSpec
 
 	u8 rotation;
 };
-
 #endif

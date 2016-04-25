@@ -18,12 +18,13 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "mg_biome.h"
+#include "mg_decoration.h"
+#include "emerge.h"
 #include "gamedef.h"
 #include "nodedef.h"
 #include "map.h" //for MMVManip
 #include "log.h"
 #include "util/numeric.h"
-#include "main.h"
 #include "util/mathconstants.h"
 #include "porting.h"
 
@@ -34,27 +35,29 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 BiomeManager::BiomeManager(IGameDef *gamedef) :
 	ObjDefManager(gamedef, OBJDEF_BIOME)
 {
+	m_gamedef = gamedef;
+
 	// Create default biome to be used in case none exist
 	Biome *b = new Biome;
 
 	b->name            = "Default";
 	b->flags           = 0;
 	b->depth_top       = 0;
-	b->depth_filler    = 0;
+	b->depth_filler    = -MAX_MAP_GENERATION_LIMIT;
 	b->depth_water_top = 0;
-	b->y_min           = -MAP_GENERATION_LIMIT;
-	b->y_max           = MAP_GENERATION_LIMIT;
+	b->y_min           = -MAX_MAP_GENERATION_LIMIT;
+	b->y_max           = MAX_MAP_GENERATION_LIMIT;
 	b->heat_point      = 0.0;
 	b->humidity_point  = 0.0;
 
-	NodeResolveInfo *nri = new NodeResolveInfo(b);
-	nri->nodenames.push_back("air");
-	nri->nodenames.push_back("air");
-	nri->nodenames.push_back("mapgen_stone");
-	nri->nodenames.push_back("mapgen_water_source");
-	nri->nodenames.push_back("mapgen_water_source");
-	nri->nodenames.push_back("air");
-	m_ndef->pendNodeResolve(nri);
+	b->m_nodenames.push_back("mapgen_stone");
+	b->m_nodenames.push_back("mapgen_stone");
+	b->m_nodenames.push_back("mapgen_stone");
+	b->m_nodenames.push_back("mapgen_water_source");
+	b->m_nodenames.push_back("mapgen_water_source");
+	b->m_nodenames.push_back("mapgen_river_water_source");
+	b->m_nodenames.push_back("ignore");
+	m_ndef->pendNodeResolve(b);
 
 	add(b);
 }
@@ -105,7 +108,16 @@ Biome *BiomeManager::getBiome(float heat, float humidity, s16 y)
 
 void BiomeManager::clear()
 {
+	EmergeManager *emerge = m_gamedef->getEmergeManager();
 
+	// Remove all dangling references in Decorations
+	DecorationManager *decomgr = emerge->decomgr;
+	for (size_t i = 0; i != decomgr->getNumObjects(); i++) {
+		Decoration *deco = (Decoration *)decomgr->getRaw(i);
+		deco->biomes.clear();
+	}
+
+	// Don't delete the first biome
 	for (size_t i = 1; i < m_objects.size(); i++) {
 		Biome *b = (Biome *)m_objects[i];
 		delete b;
@@ -118,13 +130,13 @@ void BiomeManager::clear()
 ///////////////////////////////////////////////////////////////////////////////
 
 
-void Biome::resolveNodeNames(NodeResolveInfo *nri)
+void Biome::resolveNodeNames()
 {
-	m_ndef->getIdFromResolveInfo(nri, "mapgen_dirt_with_grass", CONTENT_AIR,    c_top);
-	m_ndef->getIdFromResolveInfo(nri, "mapgen_dirt",            CONTENT_AIR,    c_filler);
-	m_ndef->getIdFromResolveInfo(nri, "mapgen_stone",           CONTENT_AIR,    c_stone);
-	m_ndef->getIdFromResolveInfo(nri, "mapgen_water_source",    CONTENT_AIR,    c_water_top);
-	m_ndef->getIdFromResolveInfo(nri, "mapgen_water_source",    CONTENT_AIR,    c_water);
-	m_ndef->getIdFromResolveInfo(nri, "air",                    CONTENT_IGNORE, c_dust);
+	getIdFromNrBacklog(&c_top,         "mapgen_stone",              CONTENT_AIR);
+	getIdFromNrBacklog(&c_filler,      "mapgen_stone",              CONTENT_AIR);
+	getIdFromNrBacklog(&c_stone,       "mapgen_stone",              CONTENT_AIR);
+	getIdFromNrBacklog(&c_water_top,   "mapgen_water_source",       CONTENT_AIR);
+	getIdFromNrBacklog(&c_water,       "mapgen_water_source",       CONTENT_AIR);
+	getIdFromNrBacklog(&c_river_water, "mapgen_river_water_source", CONTENT_AIR);
+	getIdFromNrBacklog(&c_dust,        "ignore",                    CONTENT_IGNORE);
 }
-

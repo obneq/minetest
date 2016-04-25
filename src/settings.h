@@ -22,7 +22,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "irrlichttypes_bloated.h"
 #include "util/string.h"
-#include "jthread/jmutex.h"
+#include "threading/mutex.h"
 #include <string>
 #include <map>
 #include <list>
@@ -31,8 +31,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 class Settings;
 struct NoiseParams;
 
+// Global objects
+extern Settings *g_settings;
+extern std::string g_settings_path;
+
 /** function type to register a changed callback */
-typedef void (*setting_changed_callback)(const std::string, void*);
+typedef void (*setting_changed_callback)(const std::string &name, void *data);
 
 enum ValueType {
 	VALUETYPE_STRING,
@@ -221,8 +225,8 @@ private:
 
 	std::map<std::string, std::vector<std::pair<setting_changed_callback,void*> > > m_callbacks;
 
-	mutable JMutex m_callbackMutex;
-	mutable JMutex m_mutex; // All methods that access m_settings/m_defaults directly should lock this.
+	mutable Mutex m_callbackMutex;
+	mutable Mutex m_mutex; // All methods that access m_settings/m_defaults directly should lock this.
 
 };
 

@@ -90,23 +90,26 @@ u32 PcgRandom::next()
 
 u32 PcgRandom::range(u32 bound)
 {
+	// If the bound is 0, we cover the whole RNG's range
+	if (bound == 0)
+		return next();
 	/*
 	If the bound is not a multiple of the RNG's range, it may cause bias,
 	e.g. a RNG has a range from 0 to 3 and we take want a number 0 to 2.
 	Using rand() % 3, the number 0 would be twice as likely to appear.
 	With a very large RNG range, the effect becomes less prevalent but
 	still present.  This can be solved by modifying the range of the RNG
-	to become a multiple of bound by dropping values above the a threshhold.
-	In our example, threshhold == 4 - 3 = 1 % 3 == 1, so reject 0, thus
+	to become a multiple of bound by dropping values above the a threshold.
+	In our example, threshold == 4 - 3 = 1 % 3 == 1, so reject 0, thus
 	making the range 3 with no bias.
 
 	This loop looks dangerous, but will always terminate due to the
 	RNG's property of uniformity.
 	*/
-	u32 threshhold = -bound % bound;
+	u32 threshold = -bound % bound;
 	u32 r;
 
-	while ((r = next()) < threshhold)
+	while ((r = next()) < threshold)
 		;
 
 	return r % bound;
@@ -115,7 +118,9 @@ u32 PcgRandom::range(u32 bound)
 
 s32 PcgRandom::range(s32 min, s32 max)
 {
-	assert(max >= min);
+	if (max < min)
+		throw PrngException("Invalid range (max < min)");
+
 	u32 bound = max - min + 1;
 	return range(bound) + min;
 }
@@ -136,7 +141,7 @@ void PcgRandom::bytes(void *out, size_t len)
 		*outb = r & 0xFF;
 		outb++;
 		bytes_left--;
-		r >>= 8;
+		r >>= CHAR_BIT;
 	}
 }
 
@@ -146,28 +151,28 @@ s32 PcgRandom::randNormalDist(s32 min, s32 max, int num_trials)
 	s32 accum = 0;
 	for (int i = 0; i != num_trials; i++)
 		accum += range(min, max);
-	return ((float)accum / num_trials) + 0.5f;
+	return myround((float)accum / num_trials);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 float noise2d(int x, int y, int seed)
 {
-	int n = (NOISE_MAGIC_X * x + NOISE_MAGIC_Y * y
+	unsigned int n = (NOISE_MAGIC_X * x + NOISE_MAGIC_Y * y
 			+ NOISE_MAGIC_SEED * seed) & 0x7fffffff;
 	n = (n >> 13) ^ n;
 	n = (n * (n * n * 60493 + 19990303) + 1376312589) & 0x7fffffff;
-	return 1.f - (float)n / 0x40000000;
+	return 1.f - (float)(int)n / 0x40000000;
 }
 
 
 float noise3d(int x, int y, int z, int seed)
 {
-	int n = (NOISE_MAGIC_X * x + NOISE_MAGIC_Y * y + NOISE_MAGIC_Z * z
+	unsigned int n = (NOISE_MAGIC_X * x + NOISE_MAGIC_Y * y + NOISE_MAGIC_Z * z
 			+ NOISE_MAGIC_SEED * seed) & 0x7fffffff;
 	n = (n >> 13) ^ n;
 	n = (n * (n * n * 60493 + 19990303) + 1376312589) & 0x7fffffff;
-	return 1.f - (float)n / 0x40000000;
+	return 1.f - (float)(int)n / 0x40000000;
 }
 
 
@@ -190,14 +195,6 @@ inline float biLinearInterpolation(
 {
 	float tx = easeCurve(x);
 	float ty = easeCurve(y);
-#if 0
-	return (
-		v00 * (1 - tx) * (1 - ty) +
-		v10 *      tx  * (1 - ty) +
-		v01 * (1 - tx) *      ty  +
-		v11 *      tx  *      ty
-	);
-#endif
 	float u = linearInterpolation(v00, v10, tx);
 	float v = linearInterpolation(v01, v11, tx);
 	return linearInterpolation(u, v, ty);
@@ -223,18 +220,6 @@ float triLinearInterpolation(
 	float tx = easeCurve(x);
 	float ty = easeCurve(y);
 	float tz = easeCurve(z);
-#if 0
-	return (
-		v000 * (1 - tx) * (1 - ty) * (1 - tz) +
-		v100 *      tx  * (1 - ty) * (1 - tz) +
-		v010 * (1 - tx) *      ty  * (1 - tz) +
-		v110 *      tx  *      ty  * (1 - tz) +
-		v001 * (1 - tx) * (1 - ty) *      tz  +
-		v101 *      tx  * (1 - ty) *      tz  +
-		v011 * (1 - tx) *      ty  *      tz  +
-		v111 *      tx  *      ty  *      tz
-	);
-#endif
 	float u = biLinearInterpolationNoEase(v000, v100, v010, v110, tx, ty);
 	float v = biLinearInterpolationNoEase(v001, v101, v011, v111, tx, ty);
 	return linearInterpolation(u, v, tz);
@@ -249,33 +234,6 @@ float triLinearInterpolationNoEase(
 	float v = biLinearInterpolationNoEase(v001, v101, v011, v111, x, y);
 	return linearInterpolation(u, v, z);
 }
-
-
-#if 0
-float noise2d_gradient(float x, float y, int seed)
-{
-	// Calculate the integer coordinates
-	int x0 = (x > 0.0 ? (int)x : (int)x - 1);
-	int y0 = (y > 0.0 ? (int)y : (int)y - 1);
-	// Calculate the remaining part of the coordinates
-	float xl = x - (float)x0;
-	float yl = y - (float)y0;
-	// Calculate random cosine lookup table indices for the integer corners.
-	// They are looked up as unit vector gradients from the lookup table.
-	int n00 = (int)((noise2d(x0, y0, seed)+1)*8);
-	int n10 = (int)((noise2d(x0+1, y0, seed)+1)*8);
-	int n01 = (int)((noise2d(x0, y0+1, seed)+1)*8);
-	int n11 = (int)((noise2d(x0+1, y0+1, seed)+1)*8);
-	// Make a dot product for the gradients and the positions, to get the values
-	float s = dotProduct(cos_lookup[n00], cos_lookup[(n00+12)%16], xl, yl);
-	float u = dotProduct(-cos_lookup[n10], cos_lookup[(n10+12)%16], 1.-xl, yl);
-	float v = dotProduct(cos_lookup[n01], -cos_lookup[(n01+12)%16], xl, 1.-yl);
-	float w = dotProduct(-cos_lookup[n11], -cos_lookup[(n11+12)%16], 1.-xl, 1.-yl);
-	// Interpolate between the values
-	return biLinearInterpolation(s,u,v,w,xl,yl);
-}
-#endif
-
 
 float noise2d_gradient(float x, float y, int seed, bool eased)
 {
@@ -458,7 +416,7 @@ float NoisePerlin3D(NoiseParams *np, float x, float y, float z, int seed)
 }
 
 
-Noise::Noise(NoiseParams *np_, int seed, int sx, int sy, int sz)
+Noise::Noise(NoiseParams *np_, int seed, u32 sx, u32 sy, u32 sz)
 {
 	memcpy(&np, np_, sizeof(np));
 	this->seed = seed;
@@ -485,6 +443,13 @@ Noise::~Noise()
 
 void Noise::allocBuffers()
 {
+	if (sx < 1)
+		sx = 1;
+	if (sy < 1)
+		sy = 1;
+	if (sz < 1)
+		sz = 1;
+
 	this->noise_buf = NULL;
 	resizeNoiseBuf(sz > 1);
 
@@ -503,7 +468,7 @@ void Noise::allocBuffers()
 }
 
 
-void Noise::setSize(int sx, int sy, int sz)
+void Noise::setSize(u32 sx, u32 sy, u32 sz)
 {
 	this->sx = sx;
 	this->sy = sy;
@@ -531,19 +496,28 @@ void Noise::setOctaves(int octaves)
 
 void Noise::resizeNoiseBuf(bool is3d)
 {
-	int nlx, nly, nlz;
-	float ofactor;
-
 	//maximum possible spread value factor
-	ofactor = pow(np.lacunarity, np.octaves - 1);
+	float ofactor = (np.lacunarity > 1.0) ?
+		pow(np.lacunarity, np.octaves - 1) :
+		np.lacunarity;
 
-	//noise lattice point count
-	//(int)(sz * spread * ofactor) is # of lattice points crossed due to length
+	// noise lattice point count
+	// (int)(sz * spread * ofactor) is # of lattice points crossed due to length
+	float num_noise_points_x = sx * ofactor / np.spread.X;
+	float num_noise_points_y = sy * ofactor / np.spread.Y;
+	float num_noise_points_z = sz * ofactor / np.spread.Z;
+
+	// protect against obviously invalid parameters
+	if (num_noise_points_x > 1000000000.f ||
+		num_noise_points_y > 1000000000.f ||
+		num_noise_points_z > 1000000000.f)
+		throw InvalidNoiseParamsException();
+
 	// + 2 for the two initial endpoints
 	// + 1 for potentially crossing a boundary due to offset
-	nlx = (int)ceil(sx * ofactor / np.spread.X) + 3;
-	nly = (int)ceil(sy * ofactor / np.spread.Y) + 3;
-	nlz = is3d ? (int)ceil(sz * ofactor / np.spread.Z) + 3 : 1;
+	size_t nlx = (size_t)ceil(num_noise_points_x) + 3;
+	size_t nly = (size_t)ceil(num_noise_points_y) + 3;
+	size_t nlz = is3d ? (size_t)ceil(num_noise_points_z) + 3 : 1;
 
 	delete[] noise_buf;
 	try {
@@ -572,8 +546,9 @@ void Noise::gradientMap2D(
 		int seed)
 {
 	float v00, v01, v10, v11, u, v, orig_u;
-	int index, i, j, x0, y0, noisex, noisey;
-	int nlx, nly;
+	u32 index, i, j, noisex, noisey;
+	u32 nlx, nly;
+	s32 x0, y0;
 
 	bool eased = np.flags & (NOISE_FLAG_DEFAULTS | NOISE_FLAG_EASED);
 	Interp2dFxn interpolate = eased ?
@@ -586,8 +561,8 @@ void Noise::gradientMap2D(
 	orig_u = u;
 
 	//calculate noise point lattice
-	nlx = (int)(u + sx * step_x) + 2;
-	nly = (int)(v + sy * step_y) + 2;
+	nlx = (u32)(u + sx * step_x) + 2;
+	nly = (u32)(v + sy * step_y) + 2;
 	index = 0;
 	for (j = 0; j != nly; j++)
 		for (i = 0; i != nlx; i++)
@@ -637,8 +612,9 @@ void Noise::gradientMap3D(
 	float v000, v010, v100, v110;
 	float v001, v011, v101, v111;
 	float u, v, w, orig_u, orig_v;
-	int index, i, j, k, x0, y0, z0, noisex, noisey, noisez;
-	int nlx, nly, nlz;
+	u32 index, i, j, k, noisex, noisey, noisez;
+	u32 nlx, nly, nlz;
+	s32 x0, y0, z0;
 
 	Interp3dFxn interpolate = (np.flags & NOISE_FLAG_EASED) ?
 		triLinearInterpolation : triLinearInterpolationNoEase;
@@ -653,9 +629,9 @@ void Noise::gradientMap3D(
 	orig_v = v;
 
 	//calculate noise point lattice
-	nlx = (int)(u + sx * step_x) + 2;
-	nly = (int)(v + sy * step_y) + 2;
-	nlz = (int)(w + sz * step_z) + 2;
+	nlx = (u32)(u + sx * step_x) + 2;
+	nly = (u32)(v + sy * step_y) + 2;
+	nlz = (u32)(w + sz * step_z) + 2;
 	index = 0;
 	for (k = 0; k != nlz; k++)
 		for (j = 0; j != nly; j++)

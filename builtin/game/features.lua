@@ -8,13 +8,14 @@ core.features = {
 	use_texture_alpha = true,
 	no_legacy_abms = true,
 	texture_names_parens = true,
+	area_store_custom_ids = true,
 }
 
 function core.has_feature(arg)
 	if type(arg) == "table" then
-		missing_features = {}
-		result = true
-		for ft, _ in pairs(arg) do
+		local missing_features = {}
+		local result = true
+		for ftr in pairs(arg) do
 			if not core.features[ftr] then
 				missing_features[ftr] = true
 				result = false

@@ -23,12 +23,13 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "irrlichttypes_bloated.h"
 #include "inventory.h"
 #include "constants.h" // BS
-#include "jthread/jmutex.h"
+#include "threading/mutex.h"
 #include <list>
 
 #define PLAYERNAME_SIZE 20
 
 #define PLAYERNAME_ALLOWED_CHARS "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+#define PLAYERNAME_ALLOWED_CHARS_USER_EXPL "'a' to 'z', 'A' to 'Z', '0' to '9', '-', '_'"
 
 struct PlayerControl
 {
@@ -92,6 +93,9 @@ class PlayerSAO;
 struct HudElement;
 class Environment;
 
+// IMPORTANT:
+// Do *not* perform an assignment or copy operation on a Player or
+// RemotePlayer object!  This will copy the lock held for HUD synchronization
 class Player
 {
 public:
@@ -102,7 +106,7 @@ public:
 	virtual void move(f32 dtime, Environment *env, f32 pos_max_d)
 	{}
 	virtual void move(f32 dtime, Environment *env, f32 pos_max_d,
-			std::list<CollisionInfo> *collision_info)
+			std::vector<CollisionInfo> *collision_info)
 	{}
 
 	v3f getSpeed()
@@ -114,9 +118,6 @@ public:
 	{
 		m_speed = speed;
 	}
-	
-	void accelerateHorizontal(v3f target_speed, f32 max_increase);
-	void accelerateVertical(v3f target_speed, f32 max_increase);
 
 	v3f getPosition()
 	{
@@ -127,13 +128,8 @@ public:
 
 	v3f getEyeOffset()
 	{
-		// This is at the height of the eyes of the current figure
-		// return v3f(0, BS*1.5, 0);
-		// This is more like in minecraft
-		if(camera_barely_in_ceiling)
-			return v3f(0,BS*1.5,0);
-		else
-			return v3f(0,BS*1.625,0);
+		float eye_height = camera_barely_in_ceiling ? 1.5f : 1.625f;
+		return v3f(0, BS * eye_height, 0);
 	}
 
 	v3f getEyePosition()
@@ -194,12 +190,13 @@ public:
 		return (m_yaw + 90.) * core::DEGTORAD;
 	}
 
-	const char * getName() const
+	const char *getName() const
 	{
 		return m_name;
 	}
 
-	core::aabbox3d<f32> getCollisionbox() {
+	aabb3f getCollisionbox()
+	{
 		return m_collisionbox;
 	}
 
@@ -212,12 +209,91 @@ public:
 		return size;
 	}
 
+	void setHotbarItemcount(s32 hotbar_itemcount)
+	{
+		hud_hotbar_itemcount = hotbar_itemcount;
+	}
+
+	s32 getHotbarItemcount()
+	{
+		return hud_hotbar_itemcount;
+	}
+
+	void setHotbarImage(const std::string &name)
+	{
+		hud_hotbar_image = name;
+	}
+
+	std::string getHotbarImage()
+	{
+		return hud_hotbar_image;
+	}
+
+	void setHotbarSelectedImage(const std::string &name)
+	{
+		hud_hotbar_selected_image = name;
+	}
+
+	std::string getHotbarSelectedImage() {
+		return hud_hotbar_selected_image;
+	}
+
+	void setSky(const video::SColor &bgcolor, const std::string &type,
+		const std::vector<std::string> &params)
+	{
+		m_sky_bgcolor = bgcolor;
+		m_sky_type = type;
+		m_sky_params = params;
+	}
+
+	void getSky(video::SColor *bgcolor, std::string *type,
+		std::vector<std::string> *params)
+	{
+		*bgcolor = m_sky_bgcolor;
+		*type = m_sky_type;
+		*params = m_sky_params;
+	}
+
+	void overrideDayNightRatio(bool do_override, float ratio)
+	{
+		m_day_night_ratio_do_override = do_override;
+		m_day_night_ratio = ratio;
+	}
+
+	void getDayNightRatio(bool *do_override, float *ratio)
+	{
+		*do_override = m_day_night_ratio_do_override;
+		*ratio = m_day_night_ratio;
+	}
+
+	void setLocalAnimations(v2s32 frames[4], float frame_speed)
+	{
+		for (int i = 0; i < 4; i++)
+			local_animations[i] = frames[i];
+		local_animation_speed = frame_speed;
+	}
+
+	void getLocalAnimations(v2s32 *frames, float *frame_speed)
+	{
+		for (int i = 0; i < 4; i++)
+			frames[i] = local_animations[i];
+		*frame_speed = local_animation_speed;
+	}
+
 	virtual bool isLocal() const
-	{ return false; }
+	{
+		return false;
+	}
+
 	virtual PlayerSAO *getPlayerSAO()
-	{ return NULL; }
+	{
+		return NULL;
+	}
+
 	virtual void setPlayerSAO(PlayerSAO *sao)
-	{ FATAL_ERROR("FIXME"); }
+	{
+		FATAL_ERROR("FIXME");
+	}
 
 	/*
 		serialize() writes a bunch of text that can contain
@@ -242,6 +318,7 @@ public:
 	// Use a function, if isDead can be defined by other conditions
 	bool isDead() { return hp == 0; }
 
+	bool got_teleported;
 	bool touching_ground;
 	// This oscillates so that the player jumps a bit above the surface
 	bool in_liquid;
@@ -252,7 +329,9 @@ public:
 	bool is_climbing;
 	bool swimming_vertical;
 	bool camera_barely_in_ceiling;
-	
+	v3f eye_offset_first;
+	v3f eye_offset_third;
+
 	Inventory inventory;
 
 	f32 movement_acceleration_default;
@@ -282,18 +361,19 @@ public:
 	float hurt_tilt_timer;
 	float hurt_tilt_strength;
 
+	u16 protocol_version;
 	u16 peer_id;
 
 	std::string inventory_formspec;
-	
+
 	PlayerControl control;
 	PlayerControl getPlayerControl()
 	{
 		return control;
 	}
-	
+
 	u32 keyPressed;
-	
+
 
 	HudElement* getHud(u32 id);
 	u32         addHud(HudElement* hud);
@@ -305,6 +385,8 @@ public:
 
 	u32 hud_flags;
 	s32 hud_hotbar_itemcount;
+	std::string hud_hotbar_image;
+	std::string hud_hotbar_selected_image;
 protected:
 	IGameDef *m_gamedef;
 
@@ -314,16 +396,23 @@ protected:
 	f32 m_yaw;
 	v3f m_speed;
 	v3f m_position;
-	core::aabbox3d<f32> m_collisionbox;
+	aabb3f m_collisionbox;
 
 	bool m_dirty;
 
 	std::vector<HudElement *> hud;
+
+	std::string m_sky_type;
+	video::SColor m_sky_bgcolor;
+	std::vector<std::string> m_sky_params;
+
+	bool m_day_night_ratio_do_override;
+	float m_day_night_ratio;
 private:
 	// Protect some critical areas
 	// hud for example can be modified by EmergeThread
 	// and ServerThread
-	JMutex m_mutex;
+	Mutex m_mutex;
 };
 
 
@@ -333,10 +422,7 @@ private:
 class RemotePlayer : public Player
 {
 public:
-	RemotePlayer(IGameDef *gamedef, const char *name):
-		Player(gamedef, name),
-		m_sao(NULL)
-	{}
+	RemotePlayer(IGameDef *gamedef, const char *name);
 	virtual ~RemotePlayer() {}
 
 	void save(std::string savedir);
@@ -346,7 +432,7 @@ public:
 	void setPlayerSAO(PlayerSAO *sao)
 	{ m_sao = sao; }
 	void setPosition(const v3f &position);
-	
+
 private:
 	PlayerSAO *m_sao;
 };
