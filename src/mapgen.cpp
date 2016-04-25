@@ -1,6 +1,7 @@
 /*
 Minetest
-Copyright (C) 2010-2013 celeron55, Perttu Ahola <celeron55@gmail.com>
+Copyright (C) 2010-2015 kwolekr, Ryan Kwolek <kwolekr@minetest.net>
+Copyright (C) 2010-2015 celeron55, Perttu Ahola <celeron55@gmail.com>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU Lesser General Public License as published by
@@ -28,11 +29,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "content_sao.h"
 #include "nodedef.h"
 #include "emerge.h"
-#include "content_mapnode.h" // For content_mapnode_get_new_name
 #include "voxelalgorithms.h"
+#include "porting.h"
 #include "profiler.h"
-#include "settings.h" // For g_settings
-#include "main.h" // For g_profiler
+#include "settings.h"
 #include "treegen.h"
 #include "serialization.h"
 #include "util/serialize.h"
@@ -41,11 +41,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "log.h"
 
 FlagDesc flagdesc_mapgen[] = {
-	{"trees",    MG_TREES},
-	{"caves",    MG_CAVES},
-	{"dungeons", MG_DUNGEONS},
-	{"flat",     MG_FLAT},
-	{"light",    MG_LIGHT},
+	{"trees",       MG_TREES},
+	{"caves",       MG_CAVES},
+	{"dungeons",    MG_DUNGEONS},
+	{"flat",        MG_FLAT},
+	{"light",       MG_LIGHT},
+	{"decorations", MG_DECORATIONS},
 	{NULL,       0}
 };
 
@@ -61,38 +62,43 @@ FlagDesc flagdesc_gennotify[] = {
 };
 
 
-///////////////////////////////////////////////////////////////////////////////
-
+////
+//// Mapgen
+////
 
 Mapgen::Mapgen()
 {
-	generating    = false;
-	id            = -1;
-	seed          = 0;
-	water_level   = 0;
-	flags         = 0;
+	generating  = false;
+	id          = -1;
+	seed        = 0;
+	water_level = 0;
+	flags       = 0;
 
-	vm          = NULL;
-	ndef        = NULL;
-	heightmap   = NULL;
-	biomemap    = NULL;
+	vm        = NULL;
+	ndef      = NULL;
+	heightmap = NULL;
+	biomemap  = NULL;
+	heatmap   = NULL;
+	humidmap  = NULL;
 }
 
 
 Mapgen::Mapgen(int mapgenid, MapgenParams *params, EmergeManager *emerge) :
 	gennotify(emerge->gen_notify_on, &emerge->gen_notify_on_deco_ids)
 {
-	generating    = false;
-	id            = mapgenid;
-	seed          = (int)params->seed;
-	water_level   = params->water_level;
-	flags         = params->flags;
-	csize         = v3s16(1, 1, 1) * (params->chunksize * MAP_BLOCKSIZE);
+	generating  = false;
+	id          = mapgenid;
+	seed        = (int)params->seed;
+	water_level = params->water_level;
+	flags       = params->flags;
+	csize       = v3s16(1, 1, 1) * (params->chunksize * MAP_BLOCKSIZE);
 
 	vm        = NULL;
 	ndef      = NULL;
 	heightmap = NULL;
 	biomemap  = NULL;
+	heatmap   = NULL;
+	humidmap  = NULL;
 }
 
 
@@ -138,7 +144,7 @@ s16 Mapgen::findGroundLevelFull(v2s16 p2d)
 }
 
 
-// Returns -MAP_GENERATION_LIMIT if not found
+// Returns -MAX_MAP_GENERATION_LIMIT if not found
 s16 Mapgen::findGroundLevel(v2s16 p2d, s16 ymin, s16 ymax)
 {
 	v3s16 em = vm->m_area.getExtent();
@@ -152,7 +158,27 @@ s16 Mapgen::findGroundLevel(v2s16 p2d, s16 ymin, s16 ymax)
 
 		vm->m_area.add_y(em, i, -1);
 	}
-	return (y >= ymin) ? y : -MAP_GENERATION_LIMIT;
+	return (y >= ymin) ? y : -MAX_MAP_GENERATION_LIMIT;
+}
+
+
+// Returns -MAX_MAP_GENERATION_LIMIT if not found or if ground is found first
+s16 Mapgen::findLiquidSurface(v2s16 p2d, s16 ymin, s16 ymax)
+{
+	v3s16 em = vm->m_area.getExtent();
+	u32 i = vm->m_area.index(p2d.X, ymax, p2d.Y);
+	s16 y;
+
+	for (y = ymax; y >= ymin; y--) {
+		MapNode &n = vm->m_data[i];
+		if (ndef->get(n).walkable)
+			return -MAX_MAP_GENERATION_LIMIT;
+		else if (ndef->get(n).isLiquid())
+			break;
+
+		vm->m_area.add_y(em, i, -1);
+	}
+	return (y >= ymin) ? y : -MAX_MAP_GENERATION_LIMIT;
 }
 
 
@@ -220,14 +246,31 @@ void Mapgen::lightSpread(VoxelArea &a, v3s16 p, u8 light)
 		return;
 
 	u32 vi = vm->m_area.index(p);
-	MapNode &nn = vm->m_data[vi];
+	MapNode &n = vm->m_data[vi];
 
-	light--;
-	// should probably compare masked, but doesn't seem to make a difference
-	if (light <= nn.param1 || !ndef->get(nn).light_propagates)
+	// Decay light in each of the banks separately
+	u8 light_day = light & 0x0F;
+	if (light_day > 0)
+		light_day -= 0x01;
+
+	u8 light_night = light & 0xF0;
+	if (light_night > 0)
+		light_night -= 0x10;
+
+	// Bail out only if we have no more light from either bank to propogate, or
+	// we hit a solid block that light cannot pass through.
+	if ((light_day  <= (n.param1 & 0x0F) &&
+		light_night <= (n.param1 & 0xF0)) ||
+		!ndef->get(n).light_propagates)
 		return;
 
-	nn.param1 = light;
+	// Since this recursive function only terminates when there is no light from
+	// either bank left, we need to take the max of both banks into account for
+	// the case where spreading has stopped for one light bank but not the other.
+	light = MYMAX(light_day, n.param1 & 0x0F) |
+			MYMAX(light_night, n.param1 & 0xF0);
+
+	n.param1 = light;
 
 	lightSpread(a, p + v3s16(0, 0, 1), light);
 	lightSpread(a, p + v3s16(0, 1, 0), light);
@@ -238,42 +281,28 @@ void Mapgen::lightSpread(VoxelArea &a, v3s16 p, u8 light)
 }
 
 
-void Mapgen::calcLighting(v3s16 nmin, v3s16 nmax, v3s16 full_nmin, v3s16 full_nmax)
+void Mapgen::calcLighting(v3s16 nmin, v3s16 nmax, v3s16 full_nmin, v3s16 full_nmax,
+	bool propagate_shadow)
 {
 	ScopeProfiler sp(g_profiler, "EmergeThread: mapgen lighting update", SPT_AVG);
 	//TimeTaker t("updateLighting");
 
-	propagateSunlight(nmin, nmax);
+	propagateSunlight(nmin, nmax, propagate_shadow);
 	spreadLight(full_nmin, full_nmax);
 
 	//printf("updateLighting: %dms\n", t.stop());
 }
 
 
-
-void Mapgen::calcLighting(v3s16 nmin, v3s16 nmax)
-{
-	ScopeProfiler sp(g_profiler, "EmergeThread: mapgen lighting update", SPT_AVG);
-	//TimeTaker t("updateLighting");
-
-	propagateSunlight(
-		nmin - v3s16(1, 1, 1) * MAP_BLOCKSIZE,
-		nmax + v3s16(1, 0, 1) * MAP_BLOCKSIZE);
-
-	spreadLight(
-		nmin - v3s16(1, 1, 1) * MAP_BLOCKSIZE,
-		nmax + v3s16(1, 1, 1) * MAP_BLOCKSIZE);
-
-	//printf("updateLighting: %dms\n", t.stop());
-}
-
-
-void Mapgen::propagateSunlight(v3s16 nmin, v3s16 nmax)
+void Mapgen::propagateSunlight(v3s16 nmin, v3s16 nmax, bool propagate_shadow)
 {
 	//TimeTaker t("propagateSunlight");
 	VoxelArea a(nmin, nmax);
 	bool block_is_underground = (water_level >= nmax.Y);
 	v3s16 em = vm->m_area.getExtent();
+
+	// NOTE: Direct access to the low 4 bits of param1 is okay here because,
+	// by definition, sunlight will never be in the night lightbank.
 
 	for (int z = a.MinEdge.Z; z <= a.MaxEdge.Z; z++) {
 		for (int x = a.MinEdge.X; x <= a.MaxEdge.X; x++) {
@@ -282,7 +311,8 @@ void Mapgen::propagateSunlight(v3s16 nmin, v3s16 nmax)
 			if (vm->m_data[i].getContent() == CONTENT_IGNORE) {
 				if (block_is_underground)
 					continue;
-			} else if ((vm->m_data[i].param1 & 0x0F) != LIGHT_SUN) {
+			} else if ((vm->m_data[i].param1 & 0x0F) != LIGHT_SUN &&
+					propagate_shadow) {
 				continue;
 			}
 			vm->m_area.add_y(em, i, -1);
@@ -300,7 +330,6 @@ void Mapgen::propagateSunlight(v3s16 nmin, v3s16 nmax)
 }
 
 
-
 void Mapgen::spreadLight(v3s16 nmin, v3s16 nmax)
 {
 	//TimeTaker t("spreadLight");
@@ -311,15 +340,21 @@ void Mapgen::spreadLight(v3s16 nmin, v3s16 nmax)
 			u32 i = vm->m_area.index(a.MinEdge.X, y, z);
 			for (int x = a.MinEdge.X; x <= a.MaxEdge.X; x++, i++) {
 				MapNode &n = vm->m_data[i];
-				if (n.getContent() == CONTENT_IGNORE ||
-					!ndef->get(n).light_propagates)
+				if (n.getContent() == CONTENT_IGNORE)
 					continue;
 
-				u8 light_produced = ndef->get(n).light_source & 0x0F;
-				if (light_produced)
-					n.param1 = light_produced;
+				const ContentFeatures &cf = ndef->get(n);
+				if (!cf.light_propagates)
+					continue;
 
-				u8 light = n.param1 & 0x0F;
+				// TODO(hmmmmm): Abstract away direct param1 accesses with a
+				// wrapper, but something lighter than MapNode::get/setLight
+
+				u8 light_produced = cf.light_source;
+				if (light_produced)
+					n.param1 = light_produced | (light_produced << 4);
+
+				u8 light = n.param1;
 				if (light) {
 					lightSpread(a, v3s16(x,     y,     z + 1), light);
 					lightSpread(a, v3s16(x,     y + 1, z    ), light);
@@ -336,32 +371,9 @@ void Mapgen::spreadLight(v3s16 nmin, v3s16 nmax)
 }
 
 
-
-void Mapgen::calcLightingOld(v3s16 nmin, v3s16 nmax)
-{
-	enum LightBank banks[2] = {LIGHTBANK_DAY, LIGHTBANK_NIGHT};
-	VoxelArea a(nmin, nmax);
-	bool block_is_underground = (water_level > nmax.Y);
-	bool sunlight = !block_is_underground;
-
-	ScopeProfiler sp(g_profiler, "EmergeThread: mapgen lighting update", SPT_AVG);
-
-	for (int i = 0; i < 2; i++) {
-		enum LightBank bank = banks[i];
-		std::set<v3s16> light_sources;
-		std::map<v3s16, u8> unlight_from;
-
-		voxalgo::clearLightAndCollectSources(*vm, a, bank, ndef,
-			light_sources, unlight_from);
-		voxalgo::propagateSunlight(*vm, a, sunlight, light_sources, ndef);
-
-		vm->unspreadLight(bank, unlight_from, light_sources, ndef);
-		vm->spreadLight(bank, light_sources, ndef);
-	}
-}
-
-
-///////////////////////////////////////////////////////////////////////////////
+////
+//// GenerateNotifier
+////
 
 GenerateNotifier::GenerateNotifier()
 {
@@ -428,164 +440,9 @@ void GenerateNotifier::getEvents(
 }
 
 
-///////////////////////////////////////////////////////////////////////////////
-
-
-ObjDefManager::ObjDefManager(IGameDef *gamedef, ObjDefType type)
-{
-	m_objtype = type;
-	m_ndef = gamedef->getNodeDefManager();
-}
-
-
-ObjDefManager::~ObjDefManager()
-{
-	for (size_t i = 0; i != m_objects.size(); i++)
-		delete m_objects[i];
-}
-
-
-ObjDefHandle ObjDefManager::add(ObjDef *obj)
-{
-	assert(obj);
-
-	if (obj->name.length() && getByName(obj->name))
-		return OBJDEF_INVALID_HANDLE;
-
-	u32 index = addRaw(obj);
-	if (index == OBJDEF_INVALID_INDEX)
-		return OBJDEF_INVALID_HANDLE;
-
-	obj->handle = createHandle(index, m_objtype, obj->uid);
-	return obj->handle;
-}
-
-
-ObjDef *ObjDefManager::get(ObjDefHandle handle) const
-{
-	u32 index = validateHandle(handle);
-	return (index != OBJDEF_INVALID_INDEX) ? getRaw(index) : NULL;
-}
-
-
-ObjDef *ObjDefManager::set(ObjDefHandle handle, ObjDef *obj)
-{
-	u32 index = validateHandle(handle);
-	return (index != OBJDEF_INVALID_INDEX) ? setRaw(index, obj) : NULL;
-}
-
-
-u32 ObjDefManager::addRaw(ObjDef *obj)
-{
-	size_t nobjects = m_objects.size();
-	if (nobjects >= OBJDEF_MAX_ITEMS)
-		return -1;
-
-	obj->index = nobjects;
-
-	// Ensure UID is nonzero so that a valid handle == OBJDEF_INVALID_HANDLE
-	// is not possible.  The slight randomness bias isn't very significant.
-	obj->uid = myrand() & OBJDEF_UID_MASK;
-	if (obj->uid == 0)
-		obj->uid = 1;
-
-	m_objects.push_back(obj);
-
-	infostream << "ObjDefManager: added " << getObjectTitle()
-		<< ": name=\"" << obj->name
-		<< "\" index=" << obj->index
-		<< " uid="     << obj->uid
-		<< std::endl;
-
-	return nobjects;
-}
-
-
-ObjDef *ObjDefManager::getRaw(u32 index) const
-{
-	return m_objects[index];
-}
-
-
-ObjDef *ObjDefManager::setRaw(u32 index, ObjDef *obj)
-{
-	ObjDef *old_obj = m_objects[index];
-	m_objects[index] = obj;
-	return old_obj;
-}
-
-
-ObjDef *ObjDefManager::getByName(const std::string &name) const
-{
-	for (size_t i = 0; i != m_objects.size(); i++) {
-		ObjDef *obj = m_objects[i];
-		if (obj && !strcasecmp(name.c_str(), obj->name.c_str()))
-			return obj;
-	}
-
-	return NULL;
-}
-
-
-void ObjDefManager::clear()
-{
-	for (size_t i = 0; i != m_objects.size(); i++)
-		delete m_objects[i];
-
-	m_objects.clear();
-}
-
-
-u32 ObjDefManager::validateHandle(ObjDefHandle handle) const
-{
-	ObjDefType type;
-	u32 index;
-	u32 uid;
-
-	bool is_valid =
-		(handle != OBJDEF_INVALID_HANDLE)         &&
-		decodeHandle(handle, &index, &type, &uid) &&
-		(type == m_objtype)                       &&
-		(index < m_objects.size())                &&
-		(m_objects[index]->uid == uid);
-
-	return is_valid ? index : -1;
-}
-
-
-ObjDefHandle ObjDefManager::createHandle(u32 index, ObjDefType type, u32 uid)
-{
-	ObjDefHandle handle = 0;
-	set_bits(&handle, 0, 18, index);
-	set_bits(&handle, 18, 6, type);
-	set_bits(&handle, 24, 7, uid);
-
-	u32 parity = calc_parity(handle);
-	set_bits(&handle, 31, 1, parity);
-
-	return handle ^ OBJDEF_HANDLE_SALT;
-}
-
-
-bool ObjDefManager::decodeHandle(ObjDefHandle handle, u32 *index,
-	ObjDefType *type, u32 *uid)
-{
-	handle ^= OBJDEF_HANDLE_SALT;
-
-	u32 parity = get_bits(handle, 31, 1);
-	set_bits(&handle, 31, 1, 0);
-	if (parity != calc_parity(handle))
-		return false;
-
-	*index = get_bits(handle, 0, 18);
-	*type  = (ObjDefType)get_bits(handle, 18, 6);
-	*uid   = get_bits(handle, 24, 7);
-	return true;
-}
-
-
-///////////////////////////////////////////////////////////////////////////////
-
+////
+//// MapgenParams
+////
 
 void MapgenParams::load(const Settings &settings)
 {
@@ -602,12 +459,16 @@ void MapgenParams::load(const Settings &settings)
 	settings.getS16NoEx("chunksize", chunksize);
 	settings.getFlagStrNoEx("mg_flags", flags, flagdesc_mapgen);
 	settings.getNoiseParams("mg_biome_np_heat", np_biome_heat);
+	settings.getNoiseParams("mg_biome_np_heat_blend", np_biome_heat_blend);
 	settings.getNoiseParams("mg_biome_np_humidity", np_biome_humidity);
+	settings.getNoiseParams("mg_biome_np_humidity_blend", np_biome_humidity_blend);
 
 	delete sparams;
-	sparams = EmergeManager::createMapgenParams(mg_name);
-	if (sparams)
+	MapgenFactory *mgfactory = EmergeManager::getMapgenFactory(mg_name);
+	if (mgfactory) {
+		sparams = mgfactory->createMapgenParams();
 		sparams->readParams(&settings);
+	}
 }
 
 
@@ -617,11 +478,12 @@ void MapgenParams::save(Settings &settings) const
 	settings.setU64("seed", seed);
 	settings.setS16("water_level", water_level);
 	settings.setS16("chunksize", chunksize);
-	settings.setFlagStr("mg_flags", flags, flagdesc_mapgen, (u32)-1);
+	settings.setFlagStr("mg_flags", flags, flagdesc_mapgen, U32_MAX);
 	settings.setNoiseParams("mg_biome_np_heat", np_biome_heat);
+	settings.setNoiseParams("mg_biome_np_heat_blend", np_biome_heat_blend);
 	settings.setNoiseParams("mg_biome_np_humidity", np_biome_humidity);
+	settings.setNoiseParams("mg_biome_np_humidity_blend", np_biome_humidity_blend);
 
 	if (sparams)
 		sparams->writeParams(&settings);
 }
-

@@ -64,7 +64,6 @@ private:
 	// pos = {x=num, y=num, z=num}
 	static int l_punch_node(lua_State *L);
 
-
 	// get_node_max_level(pos)
 	// pos = {x=num, y=num, z=num}
 	static int l_get_node_max_level(lua_State *L);
@@ -80,6 +79,9 @@ private:
 	// add_node_level(pos)
 	// pos = {x=num, y=num, z=num}
 	static int l_add_node_level(lua_State *L);
+
+	// find_nodes_with_meta(pos1, pos2)
+	static int l_find_nodes_with_meta(lua_State *L);
 
 	// get_meta(pos)
 	static int l_get_meta(lua_State *L);
@@ -111,6 +113,9 @@ private:
 	// get_gametime()
 	static int l_get_gametime(lua_State *L);
 
+	// get_day_count() -> int
+	static int l_get_day_count(lua_State *L);
+
 	// find_node_near(pos, radius, nodenames) -> pos or nil
 	// nodenames: eg. {"ignore", "group:tree"} or "default:dirt"
 	static int l_find_node_near(lua_State *L);
@@ -122,6 +127,9 @@ private:
 	// find_surface_nodes_in_area(minp, maxp, nodenames) -> list of positions
 	// nodenames: eg. {"ignore", "group:tree"} or "default:dirt"
 	static int l_find_nodes_in_area_under_air(lua_State *L);
+
+	// emerge_area(p1, p2)
+	static int l_emerge_area(lua_State *L);
 
 	// delete_area(p1, p2) -> true/false
 	static int l_delete_area(lua_State *L);
@@ -163,15 +171,13 @@ private:
 	// stops forceloading a position
 	static int l_forceload_free_block(lua_State *L);
 
-	// get us precision time
-	static int l_get_us_time(lua_State *L);
-
 public:
 	static void Initialize(lua_State *L, int top);
+
+	static struct EnumString es_ClearObjectsMode[];
 };
 
-class LuaABM : public ActiveBlockModifier
-{
+class LuaABM : public ActiveBlockModifier {
 private:
 	int m_id;
 
@@ -179,16 +185,18 @@ private:
 	std::set<std::string> m_required_neighbors;
 	float m_trigger_interval;
 	u32 m_trigger_chance;
+	bool m_simple_catch_up;
 public:
 	LuaABM(lua_State *L, int id,
 			const std::set<std::string> &trigger_contents,
 			const std::set<std::string> &required_neighbors,
-			float trigger_interval, u32 trigger_chance):
+			float trigger_interval, u32 trigger_chance, bool simple_catch_up):
 		m_id(id),
 		m_trigger_contents(trigger_contents),
 		m_required_neighbors(required_neighbors),
 		m_trigger_interval(trigger_interval),
-		m_trigger_chance(trigger_chance)
+		m_trigger_chance(trigger_chance),
+		m_simple_catch_up(simple_catch_up)
 	{
 	}
 	virtual std::set<std::string> getTriggerContents()
@@ -207,8 +215,38 @@ public:
 	{
 		return m_trigger_chance;
 	}
+	virtual bool getSimpleCatchUp()
+	{
+		return m_simple_catch_up;
+	}
 	virtual void trigger(ServerEnvironment *env, v3s16 p, MapNode n,
 			u32 active_object_count, u32 active_object_count_wider);
+};
+
+class LuaLBM : public LoadingBlockModifierDef
+{
+private:
+	int m_id;
+public:
+	LuaLBM(lua_State *L, int id,
+			const std::set<std::string> &trigger_contents,
+			const std::string &name,
+			bool run_at_every_load):
+		m_id(id)
+	{
+		this->run_at_every_load = run_at_every_load;
+		this->trigger_contents = trigger_contents;
+		this->name = name;
+	}
+	virtual void trigger(ServerEnvironment *env, v3s16 p, MapNode n);
+};
+
+struct ScriptCallbackState {
+	GameScripting *script;
+	int callback_ref;
+	int args_ref;
+	unsigned int refcount;
+	std::string origin;
 };
 
 #endif /* L_ENV_H_ */

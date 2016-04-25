@@ -69,20 +69,18 @@ local function get_formspec(tabview, name, tabdata)
 
 	-- separator
 	retval = retval ..
-		"box[-0.3,3.75;12.4,0.1;#FFFFFF]"
+		"box[-0.28,3.75;12.4,0.1;#FFFFFF]"
 
 	-- checkboxes
 	retval = retval ..
-		"checkbox[1.0,3.9;cb_creative;".. fgettext("Creative Mode") .. ";" ..
+		"checkbox[8.0,3.9;cb_creative;".. fgettext("Creative Mode") .. ";" ..
 		dump(core.setting_getbool("creative_mode")) .. "]"..
-		"checkbox[5.0,3.9;cb_damage;".. fgettext("Enable Damage") .. ";" ..
-		dump(core.setting_getbool("enable_damage")) .. "]" ..
-		"checkbox[8,3.9;cb_fly_mode;".. fgettext("Fly mode") .. ";" ..
-		dump(core.setting_getbool("free_move")) .. "]"
+		"checkbox[8.0,4.4;cb_damage;".. fgettext("Enable Damage") .. ";" ..
+		dump(core.setting_getbool("enable_damage")) .. "]"
 	-- buttons
 	retval = retval ..
-		"button[2.0,4.5;6,1.5;btn_start_singleplayer;" .. fgettext("Start Singleplayer") .. "]" ..
-		"button[8.25,4.5;2.5,1.5;btn_config_sp_world;" .. fgettext("Config mods") .. "]"
+		"button[0,3.7;8,1.5;btn_start_singleplayer;" .. fgettext("Start Singleplayer") .. "]" ..
+		"button[0,4.5;8,1.5;btn_config_sp_world;" .. fgettext("Config mods") .. "]"
 
 	return retval
 end
@@ -124,6 +122,7 @@ local function main_button_handler(tabview, fields, name, tabdata)
 			asyncOnlineFavourites()
 		else
 			menudata.favorites = core.get_favorites("local")
+			menudata.favorites_is_public = false
 		end
 		return true
 	end
@@ -135,11 +134,6 @@ local function main_button_handler(tabview, fields, name, tabdata)
 
 	if fields["cb_damage"] then
 		core.setting_set("enable_damage", fields["cb_damage"])
-		return true
-	end
-
-	if fields["cb_fly_mode"] then
-		core.setting_set("free_move", fields["cb_fly_mode"])
 		return true
 	end
 
@@ -156,12 +150,14 @@ local function main_button_handler(tabview, fields, name, tabdata)
 		if fav_idx ~= nil and fav_idx <= #menudata.favorites and
 			menudata.favorites[fav_idx].address == fields["te_address"] and
 			menudata.favorites[fav_idx].port    == fields["te_port"] then
+			local fav = menudata.favorites[fav_idx]
 
-			gamedata.servername			= menudata.favorites[fav_idx].name
-			gamedata.serverdescription	= menudata.favorites[fav_idx].description
+			gamedata.servername        = fav.name
+			gamedata.serverdescription = fav.description
 
-			if not is_server_protocol_compat_or_error(menudata.favorites[fav_idx].proto_min,
-					menudata.favorites[fav_idx].proto_max) then
+			if menudata.favorites_is_public and
+						not is_server_protocol_compat_or_error(
+							fav.proto_min, fav.proto_max) then
 				return true
 			end
 		else
@@ -199,14 +195,15 @@ local function on_activate(type,old_tab,new_tab)
 		asyncOnlineFavourites()
 	else
 		menudata.favorites = core.get_favorites("local")
+		menudata.favorites_is_public = false
 	end
 end
 
 --------------------------------------------------------------------------------
-tab_simple_main = {
+return {
 	name = "main",
 	caption = fgettext("Main"),
 	cbf_formspec = get_formspec,
 	cbf_button_handler = main_button_handler,
 	on_change = on_activate
-	}
+}

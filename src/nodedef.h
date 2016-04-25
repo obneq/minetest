@@ -25,6 +25,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include <iostream>
 #include <map>
 #include <list>
+#include "util/numeric.h"
 #include "mapnode.h"
 #ifndef SERVER
 #include "client/tile.h"
@@ -34,10 +35,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "sound.h" // SimpleSoundSpec
 #include "constants.h" // BS
 
+class INodeDefManager;
 class IItemDefManager;
 class ITextureSource;
 class IShaderSource;
 class IGameDef;
+class NodeResolver;
 
 typedef std::list<std::pair<content_t, int> > GroupItems;
 
@@ -60,6 +63,8 @@ enum ContentParamType2
 	CPT2_WALLMOUNTED,
 	// Block level like FLOWINGLIQUID
 	CPT2_LEVELED,
+	// 2D rotation for things like plants
+	CPT2_DEGROTATE,
 };
 
 enum LiquidType
@@ -75,6 +80,7 @@ enum NodeBoxType
 	NODEBOX_FIXED, // Static separately defined box(es)
 	NODEBOX_WALLMOUNTED, // Box for wall mounted nodes; (top, bottom, side)
 	NODEBOX_LEVELED, // Same as fixed, but with dynamic height from param2. for snow, ...
+	NODEBOX_CONNECTED, // optionally draws nodeboxes if a neighbor node attaches
 };
 
 struct NodeBox
@@ -87,6 +93,13 @@ struct NodeBox
 	aabb3f wall_top;
 	aabb3f wall_bottom;
 	aabb3f wall_side; // being at the -X side
+	// NODEBOX_CONNECTED
+	std::vector<aabb3f> connect_top;
+	std::vector<aabb3f> connect_bottom;
+	std::vector<aabb3f> connect_front;
+	std::vector<aabb3f> connect_left;
+	std::vector<aabb3f> connect_back;
+	std::vector<aabb3f> connect_right;
 
 	NodeBox()
 	{ reset(); }
@@ -98,38 +111,6 @@ struct NodeBox
 
 struct MapNode;
 class NodeMetadata;
-
-/*
-	Stand-alone definition of a TileSpec (basically a server-side TileSpec)
-*/
-enum TileAnimationType{
-	TAT_NONE=0,
-	TAT_VERTICAL_FRAMES=1,
-};
-struct TileDef
-{
-	std::string name;
-	bool backface_culling; // Takes effect only in special cases
-	struct{
-		enum TileAnimationType type;
-		int aspect_w; // width for aspect ratio
-		int aspect_h; // height for aspect ratio
-		float length; // seconds
-	} animation;
-
-	TileDef()
-	{
-		name = "";
-		backface_culling = true;
-		animation.type = TAT_NONE;
-		animation.aspect_w = 1;
-		animation.aspect_h = 1;
-		animation.length = 1.0;
-	}
-
-	void serialize(std::ostream &os, u16 protocol_version) const;
-	void deSerialize(std::istream &is);
-};
 
 enum NodeDrawType
 {
@@ -153,6 +134,42 @@ enum NodeDrawType
 	NDT_GLASSLIKE_FRAMED_OPTIONAL,	// enabled -> connected, disabled -> Glass-like
 									// uses 2 textures, one for frames, second for faces
 	NDT_MESH, // Uses static meshes
+};
+
+/*
+	Stand-alone definition of a TileSpec (basically a server-side TileSpec)
+*/
+enum TileAnimationType{
+	TAT_NONE=0,
+	TAT_VERTICAL_FRAMES=1,
+};
+struct TileDef
+{
+	std::string name;
+	bool backface_culling; // Takes effect only in special cases
+	bool tileable_horizontal;
+	bool tileable_vertical;
+	struct{
+		enum TileAnimationType type;
+		int aspect_w; // width for aspect ratio
+		int aspect_h; // height for aspect ratio
+		float length; // seconds
+	} animation;
+
+	TileDef()
+	{
+		name = "";
+		backface_culling = true;
+		tileable_horizontal = true;
+		tileable_vertical = true;
+		animation.type = TAT_NONE;
+		animation.aspect_w = 1;
+		animation.aspect_h = 1;
+		animation.length = 1.0;
+	}
+
+	void serialize(std::ostream &os, u16 protocol_version) const;
+	void deSerialize(std::istream &is, const u8 contentfeatures_version, const NodeDrawType drawtype);
 };
 
 #define CF_SPECIAL_COUNT 6
@@ -191,6 +208,7 @@ struct ContentFeatures
 	std::string mesh;
 #ifndef SERVER
 	scene::IMesh *mesh_ptr[24];
+	video::SColor minimap_color;
 #endif
 	float visual_scale; // Misc. scale parameter
 	TileDef tiledef[6];
@@ -199,6 +217,7 @@ struct ContentFeatures
 
 	// Post effect color, drawn when the camera is inside the node.
 	video::SColor post_effect_color;
+
 	// Type of MapNode::param1
 	ContentParamType param_type;
 	// Type of MapNode::param2
@@ -218,6 +237,8 @@ struct ContentFeatures
 	bool climbable;
 	// Player can build on these
 	bool buildable_to;
+	// Liquids flow into and replace node
+	bool floodable;
 	// Player cannot build to these (placement prediction disabled)
 	bool rightclickable;
 	// Flowing liquid or snow, value = default level
@@ -250,11 +271,16 @@ struct ContentFeatures
 	bool legacy_facedir_simple;
 	// Set to true if wall_mounted used to be set to true
 	bool legacy_wallmounted;
+	// for NDT_CONNECTED pairing
+	u8 connect_sides;
 
 	// Sound properties
 	SimpleSoundSpec sound_footstep;
 	SimpleSoundSpec sound_dig;
 	SimpleSoundSpec sound_dug;
+
+	std::vector<std::string> connects_to;
+	std::set<content_t> connects_to_ids;
 
 	/*
 		Methods
@@ -263,9 +289,9 @@ struct ContentFeatures
 	ContentFeatures();
 	~ContentFeatures();
 	void reset();
-	void serialize(std::ostream &os, u16 protocol_version);
+	void serialize(std::ostream &os, u16 protocol_version) const;
 	void deSerialize(std::istream &is);
-	void serializeOld(std::ostream &os, u16 protocol_version);
+	void serializeOld(std::ostream &os, u16 protocol_version) const;
 	void deSerializeOld(std::istream &is, int version);
 
 	/*
@@ -280,87 +306,46 @@ struct ContentFeatures
 	}
 };
 
-class NodeResolver;
-class INodeDefManager;
-
-struct NodeListInfo {
-	NodeListInfo(u32 len)
-	{
-		length       = len;
-		all_required = false;
-		c_fallback   = CONTENT_IGNORE;
-	}
-
-	NodeListInfo(u32 len, content_t fallback)
-	{
-		length       = len;
-		all_required = true;
-		c_fallback   = fallback;
-	}
-
-	u32 length;
-	bool all_required;
-	content_t c_fallback;
-};
-
-struct NodeResolveInfo {
-	NodeResolveInfo(NodeResolver *nr)
-	{
-		resolver = nr;
-	}
-
-	std::list<std::string> nodenames;
-	std::list<NodeListInfo> nodelistinfo;
-	NodeResolver *resolver;
-};
-
-class INodeDefManager
-{
+class INodeDefManager {
 public:
 	INodeDefManager(){}
 	virtual ~INodeDefManager(){}
 	// Get node definition
-	virtual const ContentFeatures& get(content_t c) const=0;
-	virtual const ContentFeatures& get(const MapNode &n) const=0;
+	virtual const ContentFeatures &get(content_t c) const=0;
+	virtual const ContentFeatures &get(const MapNode &n) const=0;
 	virtual bool getId(const std::string &name, content_t &result) const=0;
 	virtual content_t getId(const std::string &name) const=0;
 	// Allows "group:name" in addition to regular node names
-	virtual void getIds(const std::string &name, std::set<content_t> &result)
+	// returns false if node name not found, true otherwise
+	virtual bool getIds(const std::string &name, std::set<content_t> &result)
 			const=0;
-	virtual const ContentFeatures& get(const std::string &name) const=0;
+	virtual const ContentFeatures &get(const std::string &name) const=0;
 
-	virtual void serialize(std::ostream &os, u16 protocol_version)=0;
+	virtual void serialize(std::ostream &os, u16 protocol_version) const=0;
 
 	virtual bool getNodeRegistrationStatus() const=0;
-	virtual void setNodeRegistrationStatus(bool completed)=0;
 
-	virtual void pendNodeResolve(NodeResolveInfo *nri)=0;
-	virtual void cancelNodeResolve(NodeResolver *resolver)=0;
-	virtual void runNodeResolverCallbacks()=0;
-
-	virtual bool getIdFromResolveInfo(NodeResolveInfo *nri,
-		const std::string &node_alt, content_t c_fallback, content_t &result)=0;
-	virtual bool getIdsFromResolveInfo(NodeResolveInfo *nri,
-		std::vector<content_t> &result)=0;
+	virtual void pendNodeResolve(NodeResolver *nr)=0;
+	virtual bool cancelNodeResolveCallback(NodeResolver *nr)=0;
+	virtual bool nodeboxConnects(const MapNode from, const MapNode to, u8 connect_face)=0;
 };
 
-class IWritableNodeDefManager : public INodeDefManager
-{
+class IWritableNodeDefManager : public INodeDefManager {
 public:
 	IWritableNodeDefManager(){}
 	virtual ~IWritableNodeDefManager(){}
 	virtual IWritableNodeDefManager* clone()=0;
 	// Get node definition
-	virtual const ContentFeatures& get(content_t c) const=0;
-	virtual const ContentFeatures& get(const MapNode &n) const=0;
+	virtual const ContentFeatures &get(content_t c) const=0;
+	virtual const ContentFeatures &get(const MapNode &n) const=0;
 	virtual bool getId(const std::string &name, content_t &result) const=0;
 	// If not found, returns CONTENT_IGNORE
 	virtual content_t getId(const std::string &name) const=0;
 	// Allows "group:name" in addition to regular node names
-	virtual void getIds(const std::string &name, std::set<content_t> &result)
-			const=0;
+	virtual bool getIds(const std::string &name, std::set<content_t> &result)
+		const=0;
 	// If not found, returns the features of CONTENT_UNKNOWN
-	virtual const ContentFeatures& get(const std::string &name) const=0;
+	virtual const ContentFeatures &get(const std::string &name) const=0;
 
 	// Register node definition by name (allocate an id)
 	// If returns CONTENT_IGNORE, could not allocate id
@@ -376,50 +361,51 @@ public:
 	virtual void updateAliases(IItemDefManager *idef)=0;
 
 	/*
+		Override textures from servers with ones specified in texturepack/override.txt
+	*/
+	virtual void applyTextureOverrides(const std::string &override_filepath)=0;
+
+	/*
 		Update tile textures to latest return values of TextueSource.
 	*/
 	virtual void updateTextures(IGameDef *gamedef,
-	/*argument: */void (*progress_callback)(void *progress_args, u32 progress, u32 max_progress),
-	/*argument: */void *progress_callback_args)=0;
+		void (*progress_cbk)(void *progress_args, u32 progress, u32 max_progress),
+		void *progress_cbk_args)=0;
 
-	virtual void serialize(std::ostream &os, u16 protocol_version)=0;
+	virtual void serialize(std::ostream &os, u16 protocol_version) const=0;
 	virtual void deSerialize(std::istream &is)=0;
 
 	virtual bool getNodeRegistrationStatus() const=0;
 	virtual void setNodeRegistrationStatus(bool completed)=0;
 
-	virtual void pendNodeResolve(NodeResolveInfo *nri)=0;
-	virtual void cancelNodeResolve(NodeResolver *resolver)=0;
-	virtual void runNodeResolverCallbacks()=0;
-
-	virtual bool getIdFromResolveInfo(NodeResolveInfo *nri,
-		const std::string &node_alt, content_t c_fallback, content_t &result)=0;
-	virtual bool getIdsFromResolveInfo(NodeResolveInfo *nri,
-		std::vector<content_t> &result)=0;
+	virtual void pendNodeResolve(NodeResolver *nr)=0;
+	virtual bool cancelNodeResolveCallback(NodeResolver *nr)=0;
+	virtual void runNodeResolveCallbacks()=0;
+	virtual void resetNodeResolveState()=0;
+	virtual void mapNodeboxConnections()=0;
 };
 
 IWritableNodeDefManager *createNodeDefManager();
 
 class NodeResolver {
 public:
-	NodeResolver()
-	{
-		m_lookup_done = false;
-		m_ndef = NULL;
-	}
+	NodeResolver();
+	virtual ~NodeResolver();
+	virtual void resolveNodeNames() = 0;
 
-	virtual ~NodeResolver()
-	{
-		if (!m_lookup_done && m_ndef)
-			m_ndef->cancelNodeResolve(this);
-	}
+	bool getIdFromNrBacklog(content_t *result_out,
+		const std::string &node_alt, content_t c_fallback);
+	bool getIdsFromNrBacklog(std::vector<content_t> *result_out,
+		bool all_required=false, content_t c_fallback=CONTENT_IGNORE);
 
-	virtual void resolveNodeNames(NodeResolveInfo *nri) = 0;
+	void nodeResolveInternal();
 
-	bool m_lookup_done;
+	u32 m_nodenames_idx;
+	u32 m_nnlistsizes_idx;
+	std::vector<std::string> m_nodenames;
+	std::vector<size_t> m_nnlistsizes;
 	INodeDefManager *m_ndef;
+	bool m_resolve_done;
 };
 
-
 #endif
-

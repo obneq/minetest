@@ -29,6 +29,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "modalMenu.h"
 #include "guiTable.h"
 #include "network/networkprotocol.h"
+#include "util/string.h"
 
 class IGameDef;
 class InventoryManager;
@@ -56,7 +57,7 @@ struct TextDest
 	virtual ~TextDest() {};
 	// This is deprecated I guess? -celeron55
 	virtual void gotText(std::wstring text){}
-	virtual void gotText(std::map<std::string, std::string> fields) = 0;
+	virtual void gotText(const StringMap &fields) = 0;
 	virtual void setFormName(std::string formname)
 	{ m_formname = formname;};
 
@@ -121,49 +122,101 @@ class GUIFormSpecMenu : public GUIModalMenu
 		s32 start_item_i;
 	};
 
+	struct ListRingSpec
+	{
+		ListRingSpec()
+		{
+		}
+		ListRingSpec(const InventoryLocation &a_inventoryloc,
+				const std::string &a_listname):
+			inventoryloc(a_inventoryloc),
+			listname(a_listname)
+		{
+		}
+
+		InventoryLocation inventoryloc;
+		std::string listname;
+	};
+
 	struct ImageDrawSpec
 	{
-		ImageDrawSpec()
+		ImageDrawSpec():
+			parent_button(NULL)
 		{
 		}
 		ImageDrawSpec(const std::string &a_name,
-				v2s32 a_pos, v2s32 a_geom):
+				const std::string &a_item_name,
+				gui::IGUIButton *a_parent_button,
+				const v2s32 &a_pos, const v2s32 &a_geom):
 			name(a_name),
+			item_name(a_item_name),
+			parent_button(a_parent_button),
 			pos(a_pos),
-			geom(a_geom)
+			geom(a_geom),
+			scale(true)
 		{
-			scale = true;
 		}
 		ImageDrawSpec(const std::string &a_name,
-				v2s32 a_pos):
+				const std::string &a_item_name,
+				const v2s32 &a_pos, const v2s32 &a_geom):
 			name(a_name),
-			pos(a_pos)
+			item_name(a_item_name),
+			parent_button(NULL),
+			pos(a_pos),
+			geom(a_geom),
+			scale(true)
 		{
-			scale = false;
+		}
+		ImageDrawSpec(const std::string &a_name,
+				const v2s32 &a_pos, const v2s32 &a_geom):
+			name(a_name),
+			parent_button(NULL),
+			pos(a_pos),
+			geom(a_geom),
+			scale(true)
+		{
+		}
+		ImageDrawSpec(const std::string &a_name,
+				const v2s32 &a_pos):
+			name(a_name),
+			parent_button(NULL),
+			pos(a_pos),
+			scale(false)
+		{
 		}
 		std::string name;
+		std::string item_name;
+		gui::IGUIButton *parent_button;
 		v2s32 pos;
 		v2s32 geom;
 		bool scale;
 	};
 
+	/* The responsibility of unescaping the strings has been shifted
+	 * from the formspec parsing methods to the draw methods.
+	 * There still are a few exceptions:
+	 *  - Vertical label, because it modifies the string by inserting
+	 *    '\n' between each character,
+	 *  - Tab header, because it gives the string immediately to
+	 *    Irrlicht and we can't unescape it later.
+	 */
 	struct FieldSpec
 	{
 		FieldSpec()
 		{
 		}
-		FieldSpec(const std::wstring &name, const std::wstring &label,
-				const std::wstring &fdeflt, int id) :
+		FieldSpec(const std::string &name, const std::wstring &label,
+				const std::wstring &default_text, int id) :
 			fname(name),
-			flabel(label),
-			fdefault(fdeflt),
 			fid(id)
 		{
+			flabel = unescape_string(unescape_enriched(label));
+			fdefault = unescape_string(unescape_enriched(default_text));
 			send = false;
 			ftype = f_Unknown;
 			is_exit = false;
 		}
-		std::wstring fname;
+		std::string fname;
 		std::wstring flabel;
 		std::wstring fdefault;
 		int fid;
@@ -191,14 +244,39 @@ class GUIFormSpecMenu : public GUIModalMenu
 		}
 		TooltipSpec(std::string a_tooltip, irr::video::SColor a_bgcolor,
 				irr::video::SColor a_color):
-			tooltip(a_tooltip),
 			bgcolor(a_bgcolor),
 			color(a_color)
 		{
+			tooltip = unescape_string(unescape_enriched(utf8_to_wide(a_tooltip)));
 		}
-		std::string tooltip;
+		std::wstring tooltip;
 		irr::video::SColor bgcolor;
 		irr::video::SColor color;
+	};
+
+	struct StaticTextSpec {
+		StaticTextSpec():
+			parent_button(NULL)
+		{
+		}
+		StaticTextSpec(const std::wstring &a_text,
+				const core::rect<s32> &a_rect):
+			rect(a_rect),
+			parent_button(NULL)
+		{
+			text = unescape_string(unescape_enriched(a_text));
+		}
+		StaticTextSpec(const std::wstring &a_text,
+				const core::rect<s32> &a_rect,
+				gui::IGUIButton *a_parent_button):
+			rect(a_rect),
+			parent_button(a_parent_button)
+		{
+			text = unescape_string(unescape_enriched(a_text));
+		}
+		std::wstring text;
+		core::rect<s32> rect;
+		gui::IGUIButton *parent_button;
 	};
 
 public:
@@ -255,7 +333,7 @@ public:
 	void removeChildren();
 	void setInitialFocus();
 
-	void setFocus(std::wstring elementname)
+	void setFocus(std::string &elementname)
 	{
 		m_focused_element = elementname;
 	}
@@ -266,7 +344,7 @@ public:
 	void regenerateGui(v2u32 screensize);
 
 	ItemSpec getItemAtPos(v2s32 p) const;
-	void drawList(const ListDrawSpec &s, int phase);
+	void drawList(const ListDrawSpec &s, int phase,	bool &item_hovered);
 	void drawSelectedItem();
 	void drawMenu();
 	void updateSelectedItem();
@@ -278,7 +356,7 @@ public:
 	bool doPause;
 	bool pausesGame() { return doPause; }
 
-	GUITable* getTable(std::wstring tablename);
+	GUITable* getTable(const std::string &tablename);
 
 #ifdef __ANDROID__
 	bool getAndroidUIInput();
@@ -306,17 +384,21 @@ protected:
 
 
 	std::vector<ListDrawSpec> m_inventorylists;
+	std::vector<ListRingSpec> m_inventory_rings;
 	std::vector<ImageDrawSpec> m_backgrounds;
 	std::vector<ImageDrawSpec> m_images;
 	std::vector<ImageDrawSpec> m_itemimages;
 	std::vector<BoxDrawSpec> m_boxes;
 	std::vector<FieldSpec> m_fields;
+	std::vector<StaticTextSpec> m_static_texts;
 	std::vector<std::pair<FieldSpec,GUITable*> > m_tables;
 	std::vector<std::pair<FieldSpec,gui::IGUICheckBox*> > m_checkboxes;
-	std::map<std::wstring, TooltipSpec> m_tooltips;
+	std::map<std::string, TooltipSpec> m_tooltips;
 	std::vector<std::pair<FieldSpec,gui::IGUIScrollBar*> > m_scrollbars;
 
 	ItemSpec *m_selected_item;
+	f32 m_timer1;
+	f32 m_timer2;
 	u32 m_selected_amount;
 	bool m_selected_dragging;
 
@@ -333,7 +415,7 @@ protected:
 	u32 m_tooltip_show_delay;
 	s32 m_hovered_time;
 	s32 m_old_tooltip_id;
-	std::string m_old_tooltip;
+	std::wstring m_old_tooltip;
 
 	bool m_rmouse_auto_place;
 
@@ -355,7 +437,7 @@ private:
 	IFormSource      *m_form_src;
 	TextDest         *m_text_dst;
 	unsigned int      m_formspec_version;
-	std::wstring      m_focused_element;
+	std::string       m_focused_element;
 
 	typedef struct {
 		bool explicit_size;
@@ -364,11 +446,11 @@ private:
 		core::rect<s32> rect;
 		v2s32 basepos;
 		v2u32 screensize;
-		std::wstring focused_fieldname;
+		std::string focused_fieldname;
 		GUITable::TableOptions table_options;
 		GUITable::TableColumns table_columns;
 		// used to restore table selection/scroll/treeview state
-		std::map<std::wstring,GUITable::DynamicData> table_dyndata;
+		std::map<std::string, GUITable::DynamicData> table_dyndata;
 	} parserData;
 
 	typedef struct {
@@ -384,6 +466,7 @@ private:
 
 	void parseSize(parserData* data,std::string element);
 	void parseList(parserData* data,std::string element);
+	void parseListRing(parserData* data,std::string element);
 	void parseCheckbox(parserData* data,std::string element);
 	void parseImage(parserData* data,std::string element);
 	void parseItemImage(parserData* data,std::string element);
@@ -430,10 +513,10 @@ private:
 	gui::IGUIFont *m_font;
 
 	std::wstring getLabelByID(s32 id);
-	std::wstring getNameByID(s32 id);
+	std::string getNameByID(s32 id);
 #ifdef __ANDROID__
 	v2s32 m_down_pos;
-	std::wstring m_JavaDialogFieldName;
+	std::string m_JavaDialogFieldName;
 #endif
 
 	/* If true, remap a double-click (or double-tap) action to ESC. This is so

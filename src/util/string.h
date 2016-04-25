@@ -25,25 +25,58 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include <string>
 #include <cstring>
 #include <vector>
+#include <map>
 #include <sstream>
 #include <cctype>
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
+// Checks whether a value is an ASCII printable character
+#define IS_ASCII_PRINTABLE_CHAR(x)   \
+	(((unsigned int)(x) >= 0x20) &&  \
+	( (unsigned int)(x) <= 0x7e))
+
+// Checks whether a byte is an inner byte for an utf-8 multibyte sequence
+#define IS_UTF8_MULTB_INNER(x)       \
+	(((unsigned char)(x) >= 0x80) && \
+	( (unsigned char)(x) <= 0xbf))
+
+// Checks whether a byte is a start byte for an utf-8 multibyte sequence
+#define IS_UTF8_MULTB_START(x)       \
+	(((unsigned char)(x) >= 0xc2) && \
+	( (unsigned char)(x) <= 0xf4))
+
+// Given a start byte x for an utf-8 multibyte sequence
+// it gives the length of the whole sequence in bytes.
+#define UTF8_MULTB_START_LEN(x)            \
+	(((unsigned char)(x) < 0xe0) ? 2 :     \
+	(((unsigned char)(x) < 0xf0) ? 3 : 4))
+
+typedef std::map<std::string, std::string> StringMap;
+
 struct FlagDesc {
 	const char *name;
 	u32 flag;
 };
 
+// try not to convert between wide/utf8 encodings; this can result in data loss
+// try to only convert between them when you need to input/output stuff via Irrlicht
+std::wstring utf8_to_wide(const std::string &input);
+std::string wide_to_utf8(const std::wstring &input);
+
+wchar_t *utf8_to_wide_c(const char *str);
+
+// NEVER use those two functions unless you have a VERY GOOD reason to
+// they just convert between wide and multibyte encoding
+// multibyte encoding depends on current locale, this is no good, especially on Windows
 
 // You must free the returned string!
 // The returned string is allocated using new
 wchar_t *narrow_to_wide_c(const char *str);
-
 std::wstring narrow_to_wide(const std::string &mbs);
 std::string wide_to_narrow(const std::wstring &wcs);
-std::string translatePassword(std::string playername, std::wstring password);
+
 std::string urlencode(std::string str);
 std::string urldecode(std::string str);
 u32 readFlagString(std::string str, const FlagDesc *flagdesc, u32 *flagmask);
@@ -150,6 +183,24 @@ inline bool str_starts_with(const std::basic_string<T> &str,
 	return true;
 }
 
+/**
+ * Check whether \p str begins with the string prefix. If \p case_insensitive
+ * is true then the check is case insensitve (default is false; i.e. case is
+ * significant).
+ *
+ * @param str
+ * @param prefix
+ * @param case_insensitive
+ * @return true if the str begins with prefix
+ */
+template <typename T>
+inline bool str_starts_with(const std::basic_string<T> &str,
+		const T *prefix,
+		bool case_insensitive = false)
+{
+	return str_starts_with(str, std::basic_string<T>(prefix),
+			case_insensitive);
+}
 
 /**
  * Splits a string into its component parts separated by the character
@@ -248,15 +299,6 @@ inline s32 mystoi(const std::string &str, s32 min, s32 max)
 }
 
 
-/// Returns a 64-bit value represented by the string \p str (decimal).
-inline s64 stoi64(const std::string &str)
-{
-	std::stringstream tmp(str);
-	s64 t;
-	tmp >> t;
-	return t;
-}
-
 // MSVC2010 includes it's own versions of these
 //#if !defined(_MSC_VER) || _MSC_VER < 1600
 
@@ -295,9 +337,22 @@ inline float mystof(const std::string &str)
 #define stoi mystoi
 #define stof mystof
 
+/// Returns a value represented by the string \p val.
+template <typename T>
+inline T from_string(const std::string &str)
+{
+	std::stringstream tmp(str);
+	T t;
+	tmp >> t;
+	return t;
+}
+
+/// Returns a 64-bit signed value represented by the string \p str (decimal).
+inline s64 stoi64(const std::string &str) { return from_string<s64>(str); }
+
 // TODO: Replace with C++11 std::to_string.
 
-/// Returns A string representing the value \p val.
+/// Returns a string representing the value \p val.
 template <typename T>
 inline std::string to_string(T val)
 {
@@ -330,7 +385,6 @@ inline void str_replace(std::string &str, const std::string &pattern,
 		start = str.find(pattern, start + replacement.size());
 	}
 }
-
 
 /**
  * Replace all occurrences of the character \p from in \p str with \p to.
@@ -383,7 +437,10 @@ inline bool string_allowed_blacklist(const std::string &str,
  *	every \p row_len characters whether it breaks a word or not.  It is
  *	intended to be used for, for example, showing paths in the GUI.
  *
- * @param from The string to be wrapped into rows.
+ * @note This function doesn't wrap inside utf-8 multibyte sequences and also
+ * 	counts multibyte sequences correcly as single characters.
+ *
+ * @param from The (utf-8) string to be wrapped into rows.
  * @param row_len The row length (in characters).
  * @return A new string with the wrapping applied.
  */
@@ -392,9 +449,14 @@ inline std::string wrap_rows(const std::string &from,
 {
 	std::string to;
 
+	size_t character_idx = 0;
 	for (size_t i = 0; i < from.size(); i++) {
-		if (i != 0 && i % row_len == 0)
-			to += '\n';
+		if (!IS_UTF8_MULTB_INNER(from[i])) {
+			// Wrap string after last inner byte of char
+			if (character_idx > 0 && character_idx % row_len == 0)
+				to += '\n';
+			character_idx++;
+		}
 		to += from[i];
 	}
 
@@ -406,7 +468,7 @@ inline std::string wrap_rows(const std::string &from,
  * Removes backslashes from an escaped string (FormSpec strings)
  */
 template <typename T>
-inline std::basic_string<T> unescape_string(std::basic_string<T> &s)
+inline std::basic_string<T> unescape_string(const std::basic_string<T> &s)
 {
 	std::basic_string<T> res;
 
@@ -422,6 +484,40 @@ inline std::basic_string<T> unescape_string(std::basic_string<T> &s)
 	return res;
 }
 
+/**
+ * Remove all escape sequences in \p s.
+ *
+ * @param s The string in which to remove escape sequences.
+ * @return \p s, with escape sequences removed.
+ */
+template <typename T>
+std::basic_string<T> unescape_enriched(const std::basic_string<T> &s)
+{
+	std::basic_string<T> output;
+	size_t i = 0;
+	while (i < s.length()) {
+		if (s[i] == '\x1b') {
+			++i;
+			if (i == s.length()) continue;
+			if (s[i] == '(') {
+				++i;
+				while (i < s.length() && s[i] != ')') {
+					if (s[i] == '\\') {
+						++i;
+					}
+					++i;
+				}
+				++i;
+			} else {
+				++i;
+			}
+			continue;
+		}
+		output += s[i];
+		++i;
+	}
+	return output;
+}
 
 /**
  * Checks that all characters in \p to_check are a decimal digits.

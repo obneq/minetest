@@ -36,7 +36,10 @@ local function get_formspec(tabview, name, tabdata)
 --		"label[0.8,4.2;" .. fgettext("Add mod:") .. "]" ..
 --		TODO Disabled due to upcoming release 0.4.8 and irrlicht messing up localization
 --		"button[0.75,4.85;1.8,0.5;btn_mod_mgr_install_local;".. fgettext("Local install") .. "]" ..
-		"button[0,4.85;5.25,0.5;btn_modstore;".. fgettext("Online mod repository") .. "]"
+
+--		TODO Disabled due to service being offline, and not likely to come online again, in this form
+--		"button[0,4.85;5.25,0.5;btn_modstore;".. fgettext("Online mod repository") .. "]"
+		""
 
 	local selected_mod = nil
 
@@ -75,7 +78,7 @@ local function get_formspec(tabview, name, tabdata)
 			descriptionfile:close()
 		else
 			descriptionlines = {}
-			table.insert(descriptionlines,fgettext("No mod description available"))
+			descriptionlines[#descriptionlines + 1] = fgettext("No mod description available")
 		end
 
 		retval = retval ..
@@ -160,7 +163,7 @@ local function handle_buttons(tabview, fields, tabname, tabdata)
 end
 
 --------------------------------------------------------------------------------
-tab_mods = {
+return {
 	name = "mods",
 	caption = fgettext("Mods"),
 	cbf_formspec = get_formspec,

@@ -23,13 +23,17 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "log.h"
 #include "../constants.h" // BS, MAP_BLOCKSIZE
 #include "../noise.h" // PseudoRandom, PcgRandom
+#include "../threading/mutex_auto_lock.h"
 #include <string.h>
 #include <iostream>
 
 std::map<u16, std::vector<v3s16> > FacePositionCache::m_cache;
+Mutex FacePositionCache::m_cache_mutex;
 // Calculate the borders of a "d-radius" cube
+// TODO: Make it work without mutex and data races, probably thread-local
 std::vector<v3s16> FacePositionCache::getFacePositions(u16 d)
 {
+	MutexAutoLock cachelock(m_cache_mutex);
 	if (m_cache.find(d) != m_cache.end())
 		return m_cache[d];
 
@@ -240,9 +244,11 @@ bool isBlockInSight(v3s16 blockpos_b, v3f camera_pos, v3f camera_dir,
 	f32 cosangle = dforward / blockpos_adj.getLength();
 
 	// If block is not in the field of view, skip it
-	if(cosangle < cos(camera_fov / 2))
+	// HOTFIX: use sligthly increased angle (+10%) to fix too agressive
+	// culling. Somebody have to find out whats wrong with the math here.
+	// Previous value: camera_fov / 2
+	if(cosangle < cos(camera_fov * 0.55))
 		return false;
 
 	return true;
 }
-

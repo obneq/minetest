@@ -29,11 +29,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define DEFAULT_MAPGEN "v6"
 
 /////////////////// Mapgen flags
-#define MG_TREES         0x01
-#define MG_CAVES         0x02
-#define MG_DUNGEONS      0x04
-#define MG_FLAT          0x08
-#define MG_LIGHT         0x10
+#define MG_TREES       0x01
+#define MG_CAVES       0x02
+#define MG_DUNGEONS    0x04
+#define MG_FLAT        0x08
+#define MG_LIGHT       0x10
+#define MG_DECORATIONS 0x20
 
 class Settings;
 class MMVManip;
@@ -68,6 +69,13 @@ enum GenNotifyType {
 	GENNOTIFY_LARGECAVE_END,
 	GENNOTIFY_DECORATION,
 	NUM_GENNOTIFY_TYPES
+};
+
+// TODO(hmmmm/paramat): make stone type selection dynamic
+enum MgStoneType {
+	STONE,
+	DESERT_STONE,
+	SANDSTONE,
 };
 
 struct GenNotifyEvent {
@@ -108,7 +116,9 @@ struct MapgenParams {
 	u32 flags;
 
 	NoiseParams np_biome_heat;
+	NoiseParams np_biome_heat_blend;
 	NoiseParams np_biome_humidity;
+	NoiseParams np_biome_humidity_blend;
 
 	MapgenSpecificParams *sparams;
 
@@ -117,9 +127,11 @@ struct MapgenParams {
 		chunksize(5),
 		seed(0),
 		water_level(1),
-		flags(MG_TREES | MG_CAVES | MG_LIGHT),
-		np_biome_heat(NoiseParams(50, 50, v3f(500.0, 500.0, 500.0), 5349, 3, 0.5, 2.0)),
-		np_biome_humidity(NoiseParams(50, 50, v3f(500.0, 500.0, 500.0), 842, 3, 0.5, 2.0)),
+		flags(MG_CAVES | MG_LIGHT | MG_DECORATIONS),
+		np_biome_heat(NoiseParams(50, 50, v3f(750.0, 750.0, 750.0), 5349, 3, 0.5, 2.0)),
+		np_biome_heat_blend(NoiseParams(0, 1.5, v3f(8.0, 8.0, 8.0), 13, 2, 1.0, 2.0)),
+		np_biome_humidity(NoiseParams(50, 50, v3f(750.0, 750.0, 750.0), 842, 3, 0.5, 2.0)),
+		np_biome_humidity_blend(NoiseParams(0, 1.5, v3f(8.0, 8.0, 8.0), 90003, 2, 1.0, 2.0)),
 		sparams(NULL)
 	{}
 
@@ -141,6 +153,8 @@ public:
 	u32 blockseed;
 	s16 *heightmap;
 	u8 *biomemap;
+	float *heatmap;
+	float *humidmap;
 	v3s16 csize;
 
 	GenerateNotifier gennotify;
@@ -153,23 +167,29 @@ public:
 	static u32 getBlockSeed2(v3s16 p, int seed);
 	s16 findGroundLevelFull(v2s16 p2d);
 	s16 findGroundLevel(v2s16 p2d, s16 ymin, s16 ymax);
+	s16 findLiquidSurface(v2s16 p2d, s16 ymin, s16 ymax);
 	void updateHeightmap(v3s16 nmin, v3s16 nmax);
 	void updateLiquid(UniqueQueue<v3s16> *trans_liquid, v3s16 nmin, v3s16 nmax);
 
 	void setLighting(u8 light, v3s16 nmin, v3s16 nmax);
 	void lightSpread(VoxelArea &a, v3s16 p, u8 light);
-
-	void calcLighting(v3s16 nmin, v3s16 nmax);
-	void calcLighting(v3s16 nmin, v3s16 nmax,
-		v3s16 full_nmin, v3s16 full_nmax);
-
-	void propagateSunlight(v3s16 nmin, v3s16 nmax);
+	void calcLighting(v3s16 nmin, v3s16 nmax, v3s16 full_nmin, v3s16 full_nmax,
+		bool propagate_shadow = true);
+	void propagateSunlight(v3s16 nmin, v3s16 nmax, bool propagate_shadow);
 	void spreadLight(v3s16 nmin, v3s16 nmax);
-
-	void calcLightingOld(v3s16 nmin, v3s16 nmax);
 
 	virtual void makeChunk(BlockMakeData *data) {}
 	virtual int getGroundLevelAtPoint(v2s16 p) { return 0; }
+
+	// getSpawnLevelAtPoint() is a function within each mapgen that returns a
+	// suitable y co-ordinate for player spawn ('suitable' usually meaning
+	// within 16 nodes of water_level). If a suitable spawn level cannot be
+	// found at the specified (X, Z) 'MAX_MAP_GENERATION_LIMIT' is returned to
+	// signify this and to cause Server::findSpawnPos() to try another (X, Z).
+	virtual int getSpawnLevelAtPoint(v2s16 p) { return 0; }
+
+private:
+	DISABLE_CLASS_COPY(Mapgen);
 };
 
 struct MapgenFactory {
@@ -177,70 +197,6 @@ struct MapgenFactory {
 		EmergeManager *emerge) = 0;
 	virtual MapgenSpecificParams *createMapgenParams() = 0;
 	virtual ~MapgenFactory() {}
-};
-
-typedef std::map<std::string, std::string> StringMap;
-typedef u32 ObjDefHandle;
-
-#define OBJDEF_INVALID_INDEX ((u32)(-1))
-#define OBJDEF_INVALID_HANDLE 0
-#define OBJDEF_HANDLE_SALT 0x00585e6fu
-#define OBJDEF_MAX_ITEMS (1 << 18)
-#define OBJDEF_UID_MASK ((1 << 7) - 1)
-
-enum ObjDefType {
-	OBJDEF_GENERIC,
-	OBJDEF_BIOME,
-	OBJDEF_ORE,
-	OBJDEF_DECORATION,
-	OBJDEF_SCHEMATIC,
-};
-
-class ObjDef {
-public:
-	virtual ~ObjDef() {}
-
-	u32 index;
-	u32 uid;
-	ObjDefHandle handle;
-	std::string name;
-};
-
-class ObjDefManager {
-public:
-	ObjDefManager(IGameDef *gamedef, ObjDefType type);
-	virtual ~ObjDefManager();
-
-	virtual const char *getObjectTitle() const = 0;
-
-	virtual ObjDef *create(int type) = 0;
-	virtual void clear();
-	virtual ObjDef *getByName(const std::string &name) const;
-
-	//// Add new/get/set object definitions by handle
-	virtual ObjDefHandle add(ObjDef *obj);
-	virtual ObjDef *get(ObjDefHandle handle) const;
-	virtual ObjDef *set(ObjDefHandle handle, ObjDef *obj);
-
-	//// Raw variants that work on indexes
-	virtual u32 addRaw(ObjDef *obj);
-
-	// It is generally assumed that getRaw() will always return a valid object
-	// This won't be true if people do odd things such as call setRaw() with NULL
-	virtual ObjDef *getRaw(u32 index) const;
-	virtual ObjDef *setRaw(u32 index, ObjDef *obj);
-
-	INodeDefManager *getNodeDef() const { return m_ndef; }
-
-	u32 validateHandle(ObjDefHandle handle) const;
-	static ObjDefHandle createHandle(u32 index, ObjDefType type, u32 uid);
-	static bool decodeHandle(ObjDefHandle handle, u32 *index,
-		ObjDefType *type, u32 *uid);
-
-protected:
-	INodeDefManager *m_ndef;
-	std::vector<ObjDef *> m_objects;
-	ObjDefType m_objtype;
 };
 
 #endif

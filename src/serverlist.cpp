@@ -17,12 +17,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
 
 #include "version.h"
-#include "main.h" // for g_settings
 #include "settings.h"
 #include "serverlist.h"
 #include "filesys.h"
@@ -69,8 +69,12 @@ std::vector<ServerListSpec> getLocal()
 std::vector<ServerListSpec> getOnline()
 {
 	std::ostringstream geturl;
+
+	u16 proto_version_min = g_settings->getFlag("send_pre_v25_init") ?
+		CLIENT_PROTOCOL_VERSION_MIN_LEGACY : CLIENT_PROTOCOL_VERSION_MIN;
+
 	geturl << g_settings->get("serverlist_url") <<
-		"/list?proto_version_min=" << CLIENT_PROTOCOL_VERSION_MIN <<
+		"/list?proto_version_min=" << proto_version_min <<
 		"&proto_version_max=" << CLIENT_PROTOCOL_VERSION_MAX;
 	Json::Value root = fetchJsonValue(geturl.str(), NULL);
 
@@ -165,7 +169,7 @@ const std::string serialize(const std::vector<ServerListSpec> &serverlist)
 	std::string liststring;
 	for (std::vector<ServerListSpec>::const_iterator it = serverlist.begin();
 			it != serverlist.end();
-			it++) {
+			++it) {
 		liststring += "[server]\n";
 		liststring += (*it)["name"].asString() + '\n';
 		liststring += (*it)["address"].asString() + '\n';
@@ -182,7 +186,7 @@ const std::string serializeJson(const std::vector<ServerListSpec> &serverlist)
 	Json::Value list(Json::arrayValue);
 	for (std::vector<ServerListSpec>::const_iterator it = serverlist.begin();
 			it != serverlist.end();
-			it++) {
+			++it) {
 		list.append(*it);
 	}
 	root["list"] = list;

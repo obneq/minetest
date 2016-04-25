@@ -20,7 +20,6 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "particles.h"
 #include "constants.h"
 #include "debug.h"
-#include "main.h" // For g_profiler and g_settings
 #include "settings.h"
 #include "client/tile.h"
 #include "gamedef.h"
@@ -89,7 +88,7 @@ Particle::Particle(
 	m_vertical = vertical;
 
 	// Irrlicht stuff
-	m_collisionbox = core::aabbox3d<f32>
+	m_collisionbox = aabb3f
 			(-size/2,-size/2,-size/2,size/2,size/2,size/2);
 	this->setAutomaticCulling(scene::EAC_OFF);
 
@@ -129,17 +128,15 @@ void Particle::step(float dtime)
 	m_time += dtime;
 	if (m_collisiondetection)
 	{
-		core::aabbox3d<f32> box = m_collisionbox;
+		aabb3f box = m_collisionbox;
 		v3f p_pos = m_pos*BS;
 		v3f p_velocity = m_velocity*BS;
-		v3f p_acceleration = m_acceleration*BS;
 		collisionMoveSimple(m_env, m_gamedef,
 			BS*0.5, box,
 			0, dtime,
-			p_pos, p_velocity, p_acceleration);
+			&p_pos, &p_velocity, m_acceleration * BS);
 		m_pos = p_pos/BS;
 		m_velocity = p_velocity/BS;
-		m_acceleration = p_acceleration/BS;
 	}
 	else
 	{
@@ -289,7 +286,7 @@ void ParticleSpawner::step(float dtime, ClientEnvironment* env)
 			}
 			else
 			{
-				i++;
+				++i;
 			}
 		}
 	}
@@ -309,7 +306,7 @@ void ParticleSpawner::step(float dtime, ClientEnvironment* env)
 						*(m_maxsize-m_minsize)
 						+m_minsize;
 
-				new Particle(
+				Particle* toadd = new Particle(
 					m_gamedef,
 					m_smgr,
 					m_player,
@@ -324,6 +321,7 @@ void ParticleSpawner::step(float dtime, ClientEnvironment* env)
 					m_texture,
 					v2f(0.0, 0.0),
 					v2f(1.0, 1.0));
+				m_particlemanager->addParticle(toadd);
 			}
 		}
 	}
@@ -347,8 +345,8 @@ void ParticleManager::step(float dtime)
 
 void ParticleManager::stepSpawners (float dtime)
 {
-	JMutexAutoLock lock(m_spawner_list_lock);
-	for(std::map<u32, ParticleSpawner*>::iterator i = 
+	MutexAutoLock lock(m_spawner_list_lock);
+	for (std::map<u32, ParticleSpawner*>::iterator i =
 			m_particle_spawners.begin();
 			i != m_particle_spawners.end();)
 	{
@@ -360,14 +358,14 @@ void ParticleManager::stepSpawners (float dtime)
 		else
 		{
 			i->second->step(dtime, m_env);
-			i++;
+			++i;
 		}
 	}
 }
 
 void ParticleManager::stepParticles (float dtime)
 {
-	JMutexAutoLock lock(m_particle_list_lock);
+	MutexAutoLock lock(m_particle_list_lock);
 	for(std::vector<Particle*>::iterator i = m_particles.begin();
 			i != m_particles.end();)
 	{
@@ -380,15 +378,15 @@ void ParticleManager::stepParticles (float dtime)
 		else
 		{
 			(*i)->step(dtime);
-			i++;
+			++i;
 		}
 	}
 }
 
 void ParticleManager::clearAll ()
 {
-	JMutexAutoLock lock(m_spawner_list_lock);
-	JMutexAutoLock lock2(m_particle_list_lock);
+	MutexAutoLock lock(m_spawner_list_lock);
+	MutexAutoLock lock2(m_particle_list_lock);
 	for(std::map<u32, ParticleSpawner*>::iterator i =
 			m_particle_spawners.begin();
 			i != m_particle_spawners.end();)
@@ -410,94 +408,92 @@ void ParticleManager::clearAll ()
 void ParticleManager::handleParticleEvent(ClientEvent *event, IGameDef *gamedef,
 		scene::ISceneManager* smgr, LocalPlayer *player)
 {
-	if (event->type == CE_DELETE_PARTICLESPAWNER) {
-		JMutexAutoLock lock(m_spawner_list_lock);
-		if (m_particle_spawners.find(event->delete_particlespawner.id) !=
-				m_particle_spawners.end())
-		{
-			delete m_particle_spawners.find(event->delete_particlespawner.id)->second;
-			m_particle_spawners.erase(event->delete_particlespawner.id);
-		}
-		// no allocated memory in delete event
-		return;
-	}
-
-	if (event->type == CE_ADD_PARTICLESPAWNER) {
-
-		{
-			JMutexAutoLock lock(m_spawner_list_lock);
-			if (m_particle_spawners.find(event->add_particlespawner.id) !=
-							m_particle_spawners.end())
-			{
-				delete m_particle_spawners.find(event->add_particlespawner.id)->second;
-				m_particle_spawners.erase(event->add_particlespawner.id);
+	switch (event->type) {
+		case CE_DELETE_PARTICLESPAWNER: {
+			MutexAutoLock lock(m_spawner_list_lock);
+			if (m_particle_spawners.find(event->delete_particlespawner.id) !=
+					m_particle_spawners.end()) {
+				delete m_particle_spawners.find(event->delete_particlespawner.id)->second;
+				m_particle_spawners.erase(event->delete_particlespawner.id);
 			}
+			// no allocated memory in delete event
+			break;
 		}
-		video::ITexture *texture =
-			gamedef->tsrc()->getTextureForMesh(*(event->add_particlespawner.texture));
+		case CE_ADD_PARTICLESPAWNER: {
+			{
+				MutexAutoLock lock(m_spawner_list_lock);
+				if (m_particle_spawners.find(event->add_particlespawner.id) !=
+						m_particle_spawners.end()) {
+					delete m_particle_spawners.find(event->add_particlespawner.id)->second;
+					m_particle_spawners.erase(event->add_particlespawner.id);
+				}
+			}
 
-		ParticleSpawner* toadd = new ParticleSpawner(gamedef, smgr, player,
-				event->add_particlespawner.amount,
-				event->add_particlespawner.spawntime,
-				*event->add_particlespawner.minpos,
-				*event->add_particlespawner.maxpos,
-				*event->add_particlespawner.minvel,
-				*event->add_particlespawner.maxvel,
-				*event->add_particlespawner.minacc,
-				*event->add_particlespawner.maxacc,
-				event->add_particlespawner.minexptime,
-				event->add_particlespawner.maxexptime,
-				event->add_particlespawner.minsize,
-				event->add_particlespawner.maxsize,
-				event->add_particlespawner.collisiondetection,
-				event->add_particlespawner.vertical,
-				texture,
-				event->add_particlespawner.id,
-				this);
+			video::ITexture *texture =
+				gamedef->tsrc()->getTextureForMesh(*(event->add_particlespawner.texture));
 
-		/* delete allocated content of event */
-		delete event->add_particlespawner.minpos;
-		delete event->add_particlespawner.maxpos;
-		delete event->add_particlespawner.minvel;
-		delete event->add_particlespawner.maxvel;
-		delete event->add_particlespawner.minacc;
-		delete event->add_particlespawner.texture;
-		delete event->add_particlespawner.maxacc;
+			ParticleSpawner* toadd = new ParticleSpawner(gamedef, smgr, player,
+					event->add_particlespawner.amount,
+					event->add_particlespawner.spawntime,
+					*event->add_particlespawner.minpos,
+					*event->add_particlespawner.maxpos,
+					*event->add_particlespawner.minvel,
+					*event->add_particlespawner.maxvel,
+					*event->add_particlespawner.minacc,
+					*event->add_particlespawner.maxacc,
+					event->add_particlespawner.minexptime,
+					event->add_particlespawner.maxexptime,
+					event->add_particlespawner.minsize,
+					event->add_particlespawner.maxsize,
+					event->add_particlespawner.collisiondetection,
+					event->add_particlespawner.vertical,
+					texture,
+					event->add_particlespawner.id,
+					this);
 
-		{
-			JMutexAutoLock lock(m_spawner_list_lock);
-			m_particle_spawners.insert(
-					std::pair<u32, ParticleSpawner*>(
-							event->add_particlespawner.id,
-							toadd));
+			/* delete allocated content of event */
+			delete event->add_particlespawner.minpos;
+			delete event->add_particlespawner.maxpos;
+			delete event->add_particlespawner.minvel;
+			delete event->add_particlespawner.maxvel;
+			delete event->add_particlespawner.minacc;
+			delete event->add_particlespawner.texture;
+			delete event->add_particlespawner.maxacc;
+
+			{
+				MutexAutoLock lock(m_spawner_list_lock);
+				m_particle_spawners.insert(
+						std::pair<u32, ParticleSpawner*>(
+								event->add_particlespawner.id,
+								toadd));
+			}
+			break;
 		}
+		case CE_SPAWN_PARTICLE: {
+			video::ITexture *texture =
+				gamedef->tsrc()->getTextureForMesh(*(event->spawn_particle.texture));
 
-		return;
-	}
+			Particle* toadd = new Particle(gamedef, smgr, player, m_env,
+					*event->spawn_particle.pos,
+					*event->spawn_particle.vel,
+					*event->spawn_particle.acc,
+					event->spawn_particle.expirationtime,
+					event->spawn_particle.size,
+					event->spawn_particle.collisiondetection,
+					event->spawn_particle.vertical,
+					texture,
+					v2f(0.0, 0.0),
+					v2f(1.0, 1.0));
 
-	if (event->type == CE_SPAWN_PARTICLE) {
-		video::ITexture *texture =
-			gamedef->tsrc()->getTextureForMesh(*(event->spawn_particle.texture));
+			addParticle(toadd);
 
-		Particle* toadd = new Particle(gamedef, smgr, player, m_env,
-				*event->spawn_particle.pos,
-				*event->spawn_particle.vel,
-				*event->spawn_particle.acc,
-				event->spawn_particle.expirationtime,
-				event->spawn_particle.size,
-				event->spawn_particle.collisiondetection,
-				event->spawn_particle.vertical,
-				texture,
-				v2f(0.0, 0.0),
-				v2f(1.0, 1.0));
+			delete event->spawn_particle.pos;
+			delete event->spawn_particle.vel;
+			delete event->spawn_particle.acc;
 
-		addParticle(toadd);
-
-		delete event->spawn_particle.pos;
-		delete event->spawn_particle.vel;
-		delete event->spawn_particle.acc;
-
-		return;
+			break;
+		}
+		default: break;
 	}
 }
 
@@ -568,6 +564,6 @@ void ParticleManager::addNodeParticle(IGameDef* gamedef, scene::ISceneManager* s
 
 void ParticleManager::addParticle(Particle* toadd)
 {
-	JMutexAutoLock lock(m_particle_list_lock);
+	MutexAutoLock lock(m_particle_list_lock);
 	m_particles.push_back(toadd);
 }

@@ -20,7 +20,6 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "irrlichttypes_extrabloated.h"
 #include "mapnode.h"
 #include "porting.h"
-#include "main.h" // For g_settings
 #include "nodedef.h"
 #include "content_mapnode.h" // For mapnode_translate_*_internal
 #include "serialization.h" // For ser_ver_supported
@@ -160,13 +159,50 @@ v3s16 MapNode::getWallMountedDir(INodeDefManager *nodemgr) const
 	}
 }
 
-void MapNode::rotateAlongYAxis(INodeDefManager *nodemgr, Rotation rot) {
+void MapNode::rotateAlongYAxis(INodeDefManager *nodemgr, Rotation rot)
+{
 	ContentParamType2 cpt2 = nodemgr->get(*this).param_type_2;
 
 	if (cpt2 == CPT2_FACEDIR) {
-		u8 newrot = param2 & 3;
-		param2 &= ~3;
-		param2 |= (newrot + rot) & 3;
+		static const u8 rotate_facedir[24 * 4] = {
+			// Table value = rotated facedir
+			// Columns: 0, 90, 180, 270 degrees rotation around vertical axis
+			// Rotation is anticlockwise as seen from above (+Y)
+
+			0, 1, 2, 3,  // Initial facedir 0 to 3
+			1, 2, 3, 0,
+			2, 3, 0, 1,
+			3, 0, 1, 2,
+
+			4, 13, 10, 19,  // 4 to 7
+			5, 14, 11, 16,
+			6, 15, 8, 17,
+			7, 12, 9, 18,
+
+			8, 17, 6, 15,  // 8 to 11
+			9, 18, 7, 12,
+			10, 19, 4, 13,
+			11, 16, 5, 14,
+
+			12, 9, 18, 7,  // 12 to 15
+			13, 10, 19, 4,
+			14, 11, 16, 5,
+			15, 8, 17, 6,
+
+			16, 5, 14, 11,  // 16 to 19
+			17, 6, 15, 8,
+			18, 7, 12, 9,
+			19, 4, 13, 10,
+
+			20, 23, 22, 21,  // 20 to 23
+			21, 20, 23, 22,
+			22, 21, 20, 23,
+			23, 22, 21, 20
+		};
+		u8 facedir = (param2 & 31) % 24;
+		u8 index = facedir * 4 + rot;
+		param2 &= ~31;
+		param2 |= rotate_facedir[index];
 	} else if (cpt2 == CPT2_WALLMOUNTED) {
 		u8 wmountface = (param2 & 7);
 		if (wmountface <= 1)
@@ -178,19 +214,19 @@ void MapNode::rotateAlongYAxis(INodeDefManager *nodemgr, Rotation rot) {
 	}
 }
 
-static std::vector<aabb3f> transformNodeBox(const MapNode &n,
-		const NodeBox &nodebox, INodeDefManager *nodemgr)
+void transformNodeBox(const MapNode &n, const NodeBox &nodebox,
+		INodeDefManager *nodemgr, std::vector<aabb3f> *p_boxes, u8 neighbors = 0)
 {
-	std::vector<aabb3f> boxes;
-	if(nodebox.type == NODEBOX_FIXED || nodebox.type == NODEBOX_LEVELED)
-	{
+	std::vector<aabb3f> &boxes = *p_boxes;
+
+	if (nodebox.type == NODEBOX_FIXED || nodebox.type == NODEBOX_LEVELED) {
 		const std::vector<aabb3f> &fixed = nodebox.fixed;
 		int facedir = n.getFaceDir(nodemgr);
 		u8 axisdir = facedir>>2;
 		facedir&=0x03;
 		for(std::vector<aabb3f>::const_iterator
 				i = fixed.begin();
-				i != fixed.end(); i++)
+				i != fixed.end(); ++i)
 		{
 			aabb3f box = *i;
 
@@ -359,32 +395,71 @@ static std::vector<aabb3f> transformNodeBox(const MapNode &n,
 			boxes.push_back(box);
 		}
 	}
+	else if (nodebox.type == NODEBOX_CONNECTED)
+	{
+		size_t boxes_size = boxes.size();
+		boxes_size += nodebox.fixed.size();
+		if (neighbors & 1)
+			boxes_size += nodebox.connect_top.size();
+		if (neighbors & 2)
+			boxes_size += nodebox.connect_bottom.size();
+		if (neighbors & 4)
+			boxes_size += nodebox.connect_front.size();
+		if (neighbors & 8)
+			boxes_size += nodebox.connect_left.size();
+		if (neighbors & 16)
+			boxes_size += nodebox.connect_back.size();
+		if (neighbors & 32)
+			boxes_size += nodebox.connect_right.size();
+		boxes.reserve(boxes_size);
+
+#define BOXESPUSHBACK(c) do { \
+		for (std::vector<aabb3f>::const_iterator \
+				it = (c).begin(); \
+				it != (c).end(); ++it) \
+			(boxes).push_back(*it); \
+		} while (0)
+
+		BOXESPUSHBACK(nodebox.fixed);
+
+		if (neighbors & 1)
+			BOXESPUSHBACK(nodebox.connect_top);
+		if (neighbors & 2)
+			BOXESPUSHBACK(nodebox.connect_bottom);
+		if (neighbors & 4)
+			BOXESPUSHBACK(nodebox.connect_front);
+		if (neighbors & 8)
+			BOXESPUSHBACK(nodebox.connect_left);
+		if (neighbors & 16)
+			BOXESPUSHBACK(nodebox.connect_back);
+		if (neighbors & 32)
+			BOXESPUSHBACK(nodebox.connect_right);
+	}
 	else // NODEBOX_REGULAR
 	{
 		boxes.push_back(aabb3f(-BS/2,-BS/2,-BS/2,BS/2,BS/2,BS/2));
 	}
-	return boxes;
 }
 
-std::vector<aabb3f> MapNode::getNodeBoxes(INodeDefManager *nodemgr) const
+void MapNode::getNodeBoxes(INodeDefManager *nodemgr, std::vector<aabb3f> *boxes, u8 neighbors)
 {
 	const ContentFeatures &f = nodemgr->get(*this);
-	return transformNodeBox(*this, f.node_box, nodemgr);
+	transformNodeBox(*this, f.node_box, nodemgr, boxes, neighbors);
 }
 
-std::vector<aabb3f> MapNode::getCollisionBoxes(INodeDefManager *nodemgr) const
+void MapNode::getCollisionBoxes(INodeDefManager *nodemgr, std::vector<aabb3f> *boxes, u8 neighbors)
 {
 	const ContentFeatures &f = nodemgr->get(*this);
 	if (f.collision_box.fixed.empty())
-		return transformNodeBox(*this, f.node_box, nodemgr);
+		transformNodeBox(*this, f.node_box, nodemgr, boxes, neighbors);
 	else
-		return transformNodeBox(*this, f.collision_box, nodemgr);
+		transformNodeBox(*this, f.collision_box, nodemgr, boxes, neighbors);
 }
 
-std::vector<aabb3f> MapNode::getSelectionBoxes(INodeDefManager *nodemgr) const
+void MapNode::getSelectionBoxes(INodeDefManager *nodemgr, std::vector<aabb3f> *boxes, u8 neighbors)
 {
 	const ContentFeatures &f = nodemgr->get(*this);
-	return transformNodeBox(*this, f.selection_box, nodemgr);
+	transformNodeBox(*this, f.selection_box, nodemgr, boxes, neighbors);
 }
 
 u8 MapNode::getMaxLevel(INodeDefManager *nodemgr) const
